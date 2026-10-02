@@ -4,6 +4,10 @@
 
 ### Added
 
+- Content tracking for papers: a PostgreSQL-generated hash of the title and abstract, a
+  revision that advances only when that text changes, and the time of the last change.
+  Replays and metadata from a second source leave the revision untouched. Migration `0002`
+  backfills existing papers and stays compatible with the previous application.
 - `athena audit`: a read-only report of catalog coverage by source, year, and type, missing
   fields, and records that need review, with the first recorded audit of the development
   catalog.

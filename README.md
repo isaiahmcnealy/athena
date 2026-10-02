@@ -120,6 +120,8 @@ The venue filter searches source-provided journal/venue text; author search is n
 - An OpenAlex work that points to exactly one arXiv identifier, through an arxiv.org link or
   an arXiv DOI (`10.48550/arXiv.<id>`), shares that paper with the arXiv record. Works with
   conflicting arXiv identifiers are not auto-merged.
+- Each paper has a content hash and revision covering its title and abstract. Replaying an
+  unchanged record updates the fetch time only; the revision advances when the text changes.
 - Older source versions cannot overwrite newer source records. Conflicting identifiers fail
   reconciliation safely instead of silently merging two existing works.
 - Latest accepted source payloads and fetch times are stored. This is provenance, **not yet a

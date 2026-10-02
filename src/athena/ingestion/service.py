@@ -44,6 +44,7 @@ def upsert_paper(session: Session, record: PaperRecord) -> bool:
     now = datetime.now(UTC)
     created = not paper_ids
     paper = session.get(Paper, next(iter(paper_ids))) if paper_ids else Paper()
+    text_before = (paper.title, paper.abstract)
     # Canonical metadata is deterministic: arXiv owns its title/abstract/date;
     # OpenAlex owns papers without an arXiv record. Preserve both source records.
     if created or record.source == "arxiv" or paper.primary_source != "arxiv":
@@ -54,6 +55,11 @@ def upsert_paper(session: Session, record: PaperRecord) -> bool:
     paper.topics = sorted(set((paper.topics or []) + record.topics))
     paper.venue = record.venue or paper.venue
     paper.doi = record.doi or paper.doi
+    # updated_at records every import that touched the paper. The revision advances only
+    # when the title or abstract changed, so a replay does not invalidate derived text data.
+    if not created and (paper.title, paper.abstract) != text_before:
+        paper.content_revision += 1
+        paper.content_changed_at = now
     paper.updated_at = now
     session.add(paper)
     session.flush()

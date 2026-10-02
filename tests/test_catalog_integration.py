@@ -1,7 +1,10 @@
+import hashlib
 from datetime import date, timedelta
 
 import pytest
-from sqlalchemy import func, select
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from athena.ingestion.audit import catalog_audit
@@ -135,6 +138,81 @@ def test_cross_source_arxiv_link_deduplicates_without_doi(session, record, opena
     assert session.scalar(select(func.count()).select_from(SourceRecord)) == 2
     assert session.scalar(select(Paper.title)) == record.title
     assert session.scalar(select(Paper.abstract)) == record.abstract
+
+
+def test_replay_keeps_the_content_revision_and_a_text_change_advances_it(session, record):
+    upsert_paper(session, record)
+    session.commit()
+    first = session.scalar(select(Paper))
+    original = (first.content_hash, first.content_changed_at, first.updated_at)
+    assert first.content_revision == 1
+    expected = hashlib.md5(f"{record.title}\n{record.abstract}".encode()).hexdigest()
+    assert first.content_hash == expected
+
+    upsert_paper(session, record)
+    session.commit()
+    session.refresh(first)
+    assert (first.content_revision, first.content_hash) == (1, original[0])
+    assert first.content_changed_at == original[1]
+    assert first.updated_at > original[2]
+
+    revised = record.model_copy(
+        update={
+            "abstract": "A corrected abstract.",
+            "source_updated_at": record.source_updated_at + timedelta(days=1),
+        }
+    )
+    upsert_paper(session, revised)
+    session.commit()
+    session.refresh(first)
+    assert first.content_revision == 2
+    assert first.content_hash != original[0]
+    assert first.content_changed_at > original[1]
+
+
+def test_metadata_from_a_second_source_does_not_advance_the_content_revision(session, record):
+    upsert_paper(session, record)
+    session.commit()
+    openalex = record.model_copy(
+        update={
+            "source": "openalex",
+            "source_id": "W1",
+            "arxiv": None,
+            "title": "Other title",
+            "abstract": None,
+            "venue": "Journal of Tests",
+            "landing_url": "https://openalex.org/W1",
+        }
+    )
+    upsert_paper(session, openalex)
+    session.commit()
+    paper = session.scalar(select(Paper))
+    assert paper.venue == "Journal of Tests"
+    assert paper.content_revision == 1
+
+
+def test_content_migration_backfills_existing_papers(db):
+    config = Config("alembic.ini")
+    command.downgrade(config, "0001")
+    try:
+        with db.begin() as connection:
+            connection.execute(
+                text("""
+                    INSERT INTO papers (id, title, abstract, authors, topics, publication_date,
+                        primary_source, landing_url, work_type, updated_at)
+                    VALUES (gen_random_uuid(), 'Title only', NULL, '[]', '[]', '2024-01-01',
+                        'openalex', 'https://openalex.org/W1', 'article', '2024-02-03T00:00:00Z')
+                """)
+            )
+    finally:
+        command.upgrade(config, "head")
+    with db.connect() as connection:
+        row = connection.execute(
+            text(
+                "SELECT content_hash, content_revision, content_changed_at = updated_at FROM papers"
+            )
+        ).one()
+    assert tuple(row) == (hashlib.md5(b"Title only\n").hexdigest(), 1, True)
 
 
 def test_older_version_does_not_overwrite(session, record):

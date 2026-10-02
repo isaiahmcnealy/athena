@@ -55,6 +55,22 @@ def test_openalex_omits_abstract_and_accepts_missing_optional_metadata():
     assert paper.authors == []
 
 
+def test_openalex_recognizes_versioned_arxiv_links_and_ignores_untrusted_hosts():
+    work = {
+        "id": "https://openalex.org/W123",
+        "title": "A paper",
+        "publication_date": "2024-02-01",
+        "primary_location": {"landing_page_url": "https://arxiv.org/abs/2401.00001v3"},
+        "locations": [
+            {"pdf_url": "https://arxiv.org/pdf/2401.00001v2.pdf"},
+            {"landing_page_url": "https://example.org/abs/2401.99999"},
+        ],
+    }
+    assert parse_openalex(work).arxiv == "2401.00001"
+    work["locations"].append({"landing_page_url": "https://arxiv.org/abs/2401.00002"})
+    assert parse_openalex(work).arxiv is None
+
+
 def test_upstream_links_cannot_inject_javascript(record):
     with pytest.raises(ValidationError):
         PaperRecord.model_validate({**record.model_dump(), "landing_url": "javascript:alert(1)"})
@@ -135,3 +151,6 @@ def test_openalex_pagination_and_key_header():
     assert seen[1].url.params["cursor"] == "page2"
     assert seen[0].headers["Authorization"] == "Bearer key"
     assert "key" not in str(seen[0].url)
+    assert "type:article|review|preprint" in seen[0].url.params["filter"]
+    assert "to_publication_date:" in seen[0].url.params["filter"]
+    assert "is_retracted:false" in seen[0].url.params["filter"]

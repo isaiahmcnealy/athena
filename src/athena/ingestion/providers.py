@@ -2,6 +2,7 @@ import time
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
+from urllib.parse import urlparse
 
 import httpx
 from defusedxml import ElementTree
@@ -104,9 +105,22 @@ def parse_openalex(work: dict) -> PaperRecord:
     identifier = work["id"].rstrip("/").rsplit("/", 1)[-1]
     if not identifier.startswith("W") or not identifier[1:].isdigit():
         raise ValueError("Invalid OpenAlex work identifier")
+    arxiv_ids = set()
+    for location in [primary, *(work.get("locations") or [])]:
+        for field in ("landing_page_url", "pdf_url"):
+            url = location.get(field) or ""
+            if urlparse(url).hostname not in {"arxiv.org", "www.arxiv.org"}:
+                continue
+            try:
+                arxiv_ids.add(arxiv_id(url))
+            except ValueError:
+                continue
+    # Ambiguous links must not cause an automatic identity merge.
+    arxiv = next(iter(arxiv_ids)) if len(arxiv_ids) == 1 else None
     return PaperRecord(
         source="openalex",
         source_id=identifier,
+        arxiv=arxiv,
         title=work.get("title") or work.get("display_name") or "",
         authors=[a["author"]["display_name"] for a in work.get("authorships", [])],
         topics=[t["display_name"] for t in work.get("topics", [])][:100],
@@ -149,6 +163,7 @@ def fetch_openalex(
 ) -> Iterator[PaperRecord]:
     cursor = "*"
     count = 0
+    cutoff = datetime.now(UTC).date().isoformat()
     while cursor and count < limit:
         if count:
             http.sleep(1)
@@ -159,6 +174,9 @@ def fetch_openalex(
                 "per_page": min(100, limit - count),
                 "cursor": cursor,
                 "sort": "publication_date:desc",
+                "filter": (
+                    f"to_publication_date:{cutoff},type:article|review|preprint,is_retracted:false"
+                ),
             },
             headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
         )

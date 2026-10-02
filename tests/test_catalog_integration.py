@@ -4,11 +4,23 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from athena.ingestion.providers import ProviderError
+from athena.ingestion.providers import ProviderError, parse_openalex
 from athena.ingestion.service import IdentityConflict, run_import, upsert_paper
+from athena.ingestion.stats import catalog_stats
 from athena.models import Identifier, ImportRun, Paper, SourceRecord
 
 pytestmark = pytest.mark.integration
+
+
+def test_stats_counts_canonical_papers_and_reports_storage(db, record):
+    run_import(db, "arxiv", "stats", [record])
+    run_import(db, "arxiv", "stats replay", [record])
+    stats = catalog_stats(db)
+    assert stats["papers"] == 1
+    assert stats["source_records"] == 1
+    assert stats["identifier_keys"] == 2
+    assert stats["database_bytes"] >= stats["catalog_bytes"] > 0
+    assert any(row["index_bytes"] > 0 for row in stats["relations"])
 
 
 def test_replay_is_idempotent(session, record):
@@ -42,6 +54,27 @@ def test_cross_source_doi_dedup_keeps_arxiv_abstract(session, record):
     assert paper.venue == "Journal of Tests"
     assert session.scalar(select(func.count()).select_from(Paper)) == 1
     assert session.scalar(select(func.count()).select_from(SourceRecord)) == 2
+
+
+@pytest.mark.parametrize("openalex_first", [False, True])
+def test_cross_source_arxiv_link_deduplicates_without_doi(session, record, openalex_first):
+    arxiv = record.model_copy(update={"doi": None})
+    openalex = parse_openalex(
+        {
+            "id": "https://openalex.org/W123",
+            "title": "Alternate metadata title",
+            "publication_date": "2024-01-01",
+            "locations": [{"landing_page_url": "https://arxiv.org/abs/2401.00001v2"}],
+        }
+    )
+    records = [openalex, arxiv] if openalex_first else [arxiv, openalex]
+    for item in records:
+        upsert_paper(session, item)
+        session.commit()
+    assert session.scalar(select(func.count()).select_from(Paper)) == 1
+    assert session.scalar(select(func.count()).select_from(SourceRecord)) == 2
+    assert session.scalar(select(Paper.title)) == record.title
+    assert session.scalar(select(Paper.abstract)) == record.abstract
 
 
 def test_older_version_does_not_overwrite(session, record):

@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import json
+import math
 import uuid
 from datetime import UTC, date, datetime
 from typing import Literal
@@ -40,6 +41,12 @@ class CatalogQuery(BaseModel):
     @classmethod
     def blank_year(cls, value):
         return None if value == "" else value
+
+    @field_validator("q", "venue", mode="before")
+    @classmethod
+    def drop_nul(cls, value):
+        # PostgreSQL text cannot hold NUL; passing one through would fail the whole query.
+        return value.replace("\x00", "") if isinstance(value, str) else value
 
     @property
     def rankable(self) -> bool:
@@ -106,8 +113,10 @@ def decode_cursor(
         if snapshot.tzinfo is None:
             raise ValueError
         score = float(data["score"]) if query.ordering == "relevance" else None
+        if score is not None and not math.isfinite(score):
+            raise ValueError
         return score, date.fromisoformat(data["date"]), uuid.UUID(data["id"]), snapshot
-    except (ValueError, KeyError, TypeError, UnicodeDecodeError) as error:
+    except (ValueError, KeyError, TypeError, AttributeError, UnicodeDecodeError) as error:
         raise ValueError("Invalid cursor or cursor does not match the current filters") from error
 
 

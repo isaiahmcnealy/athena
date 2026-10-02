@@ -441,3 +441,114 @@ def test_database_failure_returns_503_and_liveness_survives(client):
     assert "sensitive" not in response.text
     assert client.get("/health/ready").status_code == 503
     assert client.get("/").status_code == 503
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"q": "x" * 301},
+        {"venue": "x" * 201},
+        {"cursor": "x" * 1025},
+        {"year": "abc"},
+        {"year": 1800},
+        {"source": "evil"},
+        {"sort": "bogus"},
+        {"limit": 0},
+        {"limit": "ten"},
+    ],
+)
+def test_oversized_and_malformed_filters_are_rejected_before_the_database(client, params):
+    assert client.get("/api/papers", params=params).status_code == 422
+    assert client.get("/", params=params).status_code == 422
+
+
+@pytest.mark.parametrize(
+    "terms",
+    [
+        "'; DROP TABLE papers; --",
+        '" OR 1=1 --',
+        '"unterminated phrase OR -',
+        "((( & | ! <->",
+        "%_\\",
+        "graph\x00neural",
+        "‮graph﻿",
+    ],
+)
+def test_hostile_search_terms_are_treated_as_text(client, db, record, terms):
+    run_import(db, "arxiv", "test", [record])
+    for path in ("/api/papers", "/"):
+        assert client.get(path, params={"q": terms}).status_code == 200
+        assert client.get(path, params={"venue": terms}).status_code == 200
+    assert client.get("/api/papers").json()["total"] == 1
+
+
+def test_venue_wildcards_match_literally(client, db, record):
+    run_import(db, "arxiv", "test", [record.model_copy(update={"venue": "Journal of Tests"})])
+    assert client.get("/api/papers", params={"venue": "journal"}).json()["total"] == 1
+    assert client.get("/api/papers", params={"venue": "%"}).json()["total"] == 0
+    assert client.get("/api/papers", params={"venue": "J_urnal"}).json()["total"] == 0
+
+
+def test_tampered_cursors_are_rejected(client, db, record):
+    import base64
+    import json
+
+    records = [
+        record.model_copy(
+            update={"source_id": f"2401.{i:05}", "arxiv": f"2401.{i:05}", "doi": None}
+        )
+        for i in range(3)
+    ]
+    run_import(db, "arxiv", "test", records)
+    cursor = client.get("/api/papers?limit=1").json()["next_cursor"]
+    payload = json.loads(base64.urlsafe_b64decode(cursor))
+    for change in (
+        {"id": "not-a-uuid"},
+        {"date": "yesterday"},
+        {"snapshot": "2024-01-01T00:00:00"},
+        {"v": 2},
+        {"filter": "0" * 16},
+        {"id": ["nested"]},
+    ):
+        forged = base64.urlsafe_b64encode(json.dumps({**payload, **change}).encode()).decode()
+        assert client.get("/api/papers", params={"limit": 1, "cursor": forged}).status_code == 400
+    ranked = client.get("/api/papers", params={"q": "graph", "limit": 1}).json()["next_cursor"]
+    payload = json.loads(base64.urlsafe_b64decode(ranked))
+    for score in ("high", None, [1], float("nan"), float("inf")):
+        forged = base64.urlsafe_b64encode(json.dumps({**payload, "score": score}).encode()).decode()
+        response = client.get("/api/papers", params={"q": "graph", "limit": 1, "cursor": forged})
+        assert response.status_code == 400
+
+
+def test_reflected_and_stored_values_cannot_inject_markup(client, db, record):
+    hostile = record.model_copy(
+        update={
+            "doi": '10.1234/"><script>alert(1)</script>',
+            "venue": "<img src=x onerror=alert(1)>",
+            "authors": ["<b>Author</b>"],
+            "topics": ["<i>topic</i>"],
+        }
+    )
+    run_import(db, "arxiv", "test", [hostile])
+    paper_id = client.get("/api/papers").json()["items"][0]["id"]
+    probe = '"><script>alert(2)</script>'
+    pages = [
+        client.get("/", params={"q": probe, "venue": probe}).text,
+        client.get("/").text,
+        client.get(f"/papers/{paper_id}").text,
+    ]
+    for html in pages:
+        assert "<script>alert" not in html
+        assert "<img src=x" not in html
+        assert "<b>Author" not in html and "<i>topic" not in html
+    detail = pages[2]
+    assert detail.count('target="_blank"') == detail.count('rel="noopener noreferrer"') >= 2
+
+
+def test_security_headers_cover_pages_errors_and_the_api(client):
+    for path in ("/", "/about", "/api/papers", "/papers/not-a-uuid", "/missing"):
+        headers = client.get(path).headers
+        assert headers["X-Content-Type-Options"] == "nosniff"
+        assert headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
+        assert "frame-ancestors 'none'" in headers["Content-Security-Policy"]
+        assert "script-src" not in headers["Content-Security-Policy"]  # default-src 'self' applies

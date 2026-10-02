@@ -4,6 +4,9 @@
 
 ### Added
 
+- Request-boundary tests for oversized and malformed filters, hostile search terms, literal
+  venue wildcards, forged cursors, markup injection through stored and reflected values, and
+  security headers on pages, errors, and the API.
 - Content tracking for papers: a PostgreSQL-generated hash of the title and abstract, a
   revision that advances only when that text changes, and the time of the last change.
   Replays and metadata from a second source leave the revision untouched. Migration `0002`
@@ -64,6 +67,9 @@
 
 ### Fixed
 
+- A search or venue filter containing a NUL byte returned 503; the byte is now dropped.
+- A forged pagination cursor with a non-text ID returned 500, and one with a non-finite
+  score was accepted; both now return 400.
 - The arXiv option was missing from the source filter on the catalog page.
 - A short arXiv page inside the reported result window is refetched and then fails the run,
   instead of ending the query early and reporting it as completed.

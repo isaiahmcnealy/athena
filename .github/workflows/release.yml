@@ -36,7 +36,7 @@ jobs:
       ATHENA_INGEST_DB_PASSWORD: ci-disposable-ingest
       ATHENA_DOMAIN: localhost
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build AMD64 image
         run: >-
           docker build --platform linux/amd64 --tag athena:release
@@ -95,7 +95,7 @@ jobs:
       PUBLIC_URL: ${{ vars.PUBLIC_URL }}
       ATHENA_IMAGE: ${{ needs.image.outputs.image }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Join the private deployment network
         uses: tailscale/github-action@v4
         with:

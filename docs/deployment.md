@@ -257,6 +257,10 @@ Check the logs after the first scheduled runs, and watch disk use with `df -h` a
 
 ## Failure and recovery
 
+Day-to-day incidents such as an unreachable site, a full disk, a failing refresh or backup,
+and secret rotation are in the [server runbook](runbook.md). This section covers releases,
+rollback, and restore.
+
 - **Pull, backup, migration, or role failure:** the job stops before replacing the web
   container. A failed migration may still need investigation. Use backward-compatible
   migrations while the previous app is serving. Inspect the job output and database before

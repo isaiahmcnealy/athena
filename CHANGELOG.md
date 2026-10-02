@@ -4,6 +4,8 @@
 
 ### Added
 
+- Server runbook covering an unreachable site, database trouble, disk pressure, failing
+  refreshes and backups, stuck imports, and secret rotation.
 - Connection and resource bounds for the release stack: the web server answers 503 beyond 64
   requests in flight, gives in-flight requests 20 seconds on shutdown, and every container
   has a CPU limit. PostgreSQL gets 60 seconds to shut down cleanly.

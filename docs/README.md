@@ -10,6 +10,8 @@
   duplicates, and what they mean for search and recommendations.
 - [Cloud deployment](deployment.md): branch workflow, server setup, DNS, secrets, releases,
   scheduled refresh and backup, and recovery.
+- [Server runbook](runbook.md): what to check and do for an unreachable site, database
+  trouble, disk pressure, failing refreshes or backups, stuck imports, and leaked secrets.
 - [ADR 001: release deployment](decisions/001-mac-mini-releases.md): original Mac mini design;
   its hosting parts are superseded by ADR 002.
 - [ADR 002: public preview on a cloud host](decisions/002-public-preview-cloud-host.md): what

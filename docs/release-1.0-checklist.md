@@ -142,7 +142,7 @@ Local verification on 2026-10-02: 81 tests passed, including the PostgreSQL inte
 - [x] Capture request ID, bounded route, status and latency. Add worker/model release context where useful. Keep secrets, user identifiers, raw queries, abstracts and interests out of logs/traces and metric labels.
   - _Status 2026-10-02:_ Unchanged structured request logs. The container's access log is now off, so addresses and search terms are not written; checked on the local release stack.
 - [ ] Add an operator runbook for restart, disk pressure, provider outage, stuck import, bad model promotion, compromised key, failed backup, database restore and rollback.
-  - _Status 2026-10-02:_ The deployment guide covers failed releases, certificates, rollback, restore, rate-limit complaints, stale locks, and disk growth. Provider outage, compromised key, and failed backup are not written up.
+  - _Status 2026-10-02:_ The [server runbook](runbook.md) and deployment guide cover restart, disk pressure, provider outage, stuck import, compromised key, failed backup, restore, and rollback. Bad model promotion waits for the recommender, and none of it has been exercised on a real server.
 - [ ] Run a failure drill: stop database, stop worker, fill/approach disk limit in staging, make encoder unavailable and deploy a deliberately unhealthy app. Confirm useful error behavior and recovery.
 - [ ] Perform one public load test against Athena only, never the source providers. State host specs, corpus size, request mix, concurrency, p50/p95/p99, errors and memory. Choose a small initial target such as 10 requests/second only if it fits the expected demo, then record the measured result.
 

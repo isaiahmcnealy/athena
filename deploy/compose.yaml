@@ -1,4 +1,10 @@
-# Release services. Local development continues to use the root compose.yaml.
+# Release services for the public cloud host. Local development uses the root compose.yaml.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   db:
     image: postgres:17-alpine
@@ -7,6 +13,9 @@ services:
       POSTGRES_USER: athena
       POSTGRES_DB: athena
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the server .env}
+      # Read by roles.sql when deploy.sh sets the limited roles' passwords.
+      ATHENA_WEB_DB_PASSWORD: ${ATHENA_WEB_DB_PASSWORD:?Set ATHENA_WEB_DB_PASSWORD in the server .env}
+      ATHENA_INGEST_DB_PASSWORD: ${ATHENA_INGEST_DB_PASSWORD:?Set ATHENA_INGEST_DB_PASSWORD in the server .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -14,36 +23,84 @@ services:
       interval: 3s
       timeout: 3s
       retries: 20
+    mem_limit: 768m
+    logging: *logging
   migrate:
     image: ${ATHENA_IMAGE:?Set ATHENA_IMAGE to the release image digest}
-    platform: linux/arm64
     profiles: [tools]
     environment:
+      # Schema changes run as the owning role. No long-running service uses it.
       DATABASE_URL: postgresql+psycopg://athena:${POSTGRES_PASSWORD}@db:5432/athena
     command: ["/app/.venv/bin/alembic", "upgrade", "head"]
+    logging: *logging
   web:
     image: ${ATHENA_IMAGE:?Set ATHENA_IMAGE to the release image digest}
-    platform: linux/arm64
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql+psycopg://athena:${POSTGRES_PASSWORD}@db:5432/athena
+      # Read-only role; see roles.sql.
+      DATABASE_URL: postgresql+psycopg://athena_web:${ATHENA_WEB_DB_PASSWORD}@db:5432/athena
+      ALLOWED_HOSTS: ${ATHENA_DOMAIN:?Set ATHENA_DOMAIN in the server .env},localhost,127.0.0.1
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-120}
+      # Accept the client address only from the reverse proxy's fixed address.
+      FORWARDED_ALLOW_IPS: 172.30.80.2
     ports:
+      # Loopback only, for on-host checks. Public traffic arrives through caddy.
       - "127.0.0.1:${ATHENA_PORT:-8001}:8000"
+    networks: [default, edge]
     healthcheck:
       test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=5)"]
       interval: 5s
       timeout: 6s
       retries: 12
       start_period: 10s
+    mem_limit: 512m
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
+  caddy:
+    image: caddy:2.11-alpine
+    restart: unless-stopped
+    environment:
+      ATHENA_DOMAIN: ${ATHENA_DOMAIN:?Set ATHENA_DOMAIN in the server .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates and ACME account state; losing this volume forces reissue.
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      edge:
+        ipv4_address: 172.30.80.2
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "443"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    mem_limit: 128m
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
   ingest:
     image: ${ATHENA_IMAGE:?Set ATHENA_IMAGE to the release image digest}
-    platform: linux/arm64
     profiles: [tools]
     environment:
-      DATABASE_URL: postgresql+psycopg://athena:${POSTGRES_PASSWORD}@db:5432/athena
+      # May read and write catalog rows, but cannot change the schema; see roles.sql.
+      DATABASE_URL: postgresql+psycopg://athena_ingest:${ATHENA_INGEST_DB_PASSWORD}@db:5432/athena
       OPENALEX_API_KEY: ${OPENALEX_API_KEY:-}
       CONTACT_EMAIL: ${CONTACT_EMAIL:-}
     entrypoint: ["/app/.venv/bin/athena"]
     command: ["ingest", "arxiv", "--limit", "50"]
+    mem_limit: 512m
+    logging: *logging
+networks:
+  # The proxy and the web app share this network; the database is not attached to it.
+  edge:
+    ipam:
+      config:
+        - subnet: 172.30.80.0/24
+          # Automatic addresses come from the upper half, leaving caddy's fixed address free.
+          ip_range: 172.30.80.128/25
 volumes:
   postgres_data:
+  caddy_data:
+  caddy_config:

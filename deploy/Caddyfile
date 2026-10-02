@@ -1,0 +1,35 @@
+# Public HTTPS entry point. Caddy obtains and renews the certificate for ATHENA_DOMAIN
+# and redirects HTTP to HTTPS. Access logs stay off: they would record client addresses
+# and search terms.
+{
+	servers {
+		# HTTP/3 needs UDP 443, which is not published.
+		protocols h1 h2
+		timeouts {
+			read_header 10s
+			read_body 10s
+			idle 2m
+		}
+		max_header_size 16KB
+	}
+}
+
+{$ATHENA_DOMAIN} {
+	encode zstd gzip
+
+	# Operational endpoints are not public. Read metrics on the host through the loopback port.
+	@private path /metrics /metrics/*
+	respond @private 404
+
+	# The public API is read-only; nothing legitimate sends a large body.
+	request_body {
+		max_size 64KB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+
+	reverse_proxy web:8000
+}

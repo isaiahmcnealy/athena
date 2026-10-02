@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}About · Athena{% endblock %}
+{% block content %}
+<main id="main" class="detail-shell prose">
+  <p class="eyebrow">PUBLIC PREVIEW</p>
+  <h1>About Athena</h1>
+  <p>Athena is a searchable catalog of research on artificial intelligence and the fields it touches. This is an early public preview: it offers search, filters, and paper details. Recommendations and personal libraries are planned and are not available yet.</p>
+  <h2>Sources and attribution</h2>
+  <p>Paper metadata comes from the <a href="https://info.arxiv.org/help/api/index.html" target="_blank" rel="noopener noreferrer">arXiv API</a> and <a href="https://openalex.org" target="_blank" rel="noopener noreferrer">OpenAlex</a>. Abstracts are shown for arXiv records only. Athena links to the original record and does not host or redistribute full papers. Thank you to arXiv for use of its open access interoperability.</p>
+  <p>The catalog covers a curated set of topics and is refreshed periodically, so it is not a complete index of either source. Inclusion does not establish peer-review status, and Athena is an independent project that is not endorsed by arXiv or OpenAlex.</p>
+  <h2>How results are ordered</h2>
+  <p>Searches match the words in titles and available abstracts. “Most relevant” is a lexical score that favors title matches; it is not a learned or personalized ranking. “Newest” orders by publication date. Searching for a DOI or an arXiv identifier looks up that exact work.</p>
+  <h2>Your data</h2>
+  <p>Athena has no accounts, sets no cookies, and loads no analytics or third-party scripts. The application records request counts and timings per page type, and briefly keeps client addresses in memory to limit abuse. It does not write search terms or client addresses to its logs.</p>
+  <h2>Contact</h2>
+  <p>Report a problem or an incorrect record through the <a href="https://github.com/isaiahmcnealy/athena/issues" target="_blank" rel="noopener noreferrer">project issue tracker</a>. Athena is built by Isaiah McNealy; see more at <a href="https://isaiahmcnealy.com">isaiahmcnealy.com</a>.</p>
+</main>
+{% endblock %}

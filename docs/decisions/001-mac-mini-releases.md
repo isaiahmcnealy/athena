@@ -1,6 +1,7 @@
 # ADR 001: master releases to a Mac mini
 
-Status: accepted. Date: 2026-10-02.
+Status: accepted; hosting superseded by [ADR 002](002-public-preview-cloud-host.md).
+Date: 2026-10-02.
 
 ## Context
 

@@ -133,7 +133,9 @@ database avoids overwriting a working catalog. Never treat an untested backup as
 - Inject provider 429/503 responses in tests; verify retry bounds and partial-progress preservation.
 - Attempt a source record with identifiers belonging to two papers; verify safe rejection.
 
-Before public deployment: configure HTTPS, private database networking, non-default secrets,
-backups/restore drills, trusted proxy settings, rate limits, and private metrics. Authentication is
-required before personal collections are added. Validate migrations and load-test on specified
-hardware. This initial release makes no unmeasured throughput or availability claims.
+The local stack is for development only. The release stack in `deploy/` adds HTTPS, private
+database networking, limited database roles, non-default secrets, trusted proxy handling, rate
+limits, private metrics, and scheduled backups; see the [deployment guide](deployment.md).
+Still open before a 1.0 claim: a recorded restore drill and load test on the real host.
+Authentication is required before personal collections are added. This release makes no
+unmeasured throughput or availability claims.

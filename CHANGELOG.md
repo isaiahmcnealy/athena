@@ -4,6 +4,26 @@
 
 ### Added
 
+- Relevance ordering for searches (`sort=relevance`, the default when a query has terms) using
+  PostgreSQL `ts_rank`, with "Newest" kept as a separate ordering, a `sort` field in API
+  responses, and a sort control on the results page.
+- Exact lookup when the search box or `q` holds a DOI or an arXiv identifier.
+- About page covering sources and attribution, how results are ordered, data handling, and
+  contact, linked from the navigation and footer.
+- Public release stack: Caddy for HTTPS with automatic certificates and an HTTP redirect,
+  `/metrics` blocked at the proxy, a read-only database role for the web app, an importer
+  role that can write rows but not change the schema, memory limits, and log rotation.
+- Per-client request limit (`RATE_LIMIT_PER_MINUTE`) returning `429` with `Retry-After`, and a
+  host allow-list (`ALLOWED_HOSTS`). Client addresses come from forwarded headers only when
+  sent by the proxy.
+- Scheduled jobs for the server: `refresh.sh` imports the newest records for every seed topic,
+  and `backup.sh` writes a dated dump, prunes old scheduled dumps, and can copy to S3.
+- Uptime workflow that checks public readiness and catalog size every 15 minutes, a post-deploy
+  HTTPS check in the release pipeline, and weekly Dependabot updates.
+- ADR 002: public preview scope, cloud hosting, the public boundary, and availability limits.
+- Version 1.0 public release checklist with implementation gates and verification evidence.
+- Production and portfolio roadmap with a repository review, prioritized recommendation features,
+  evaluation plan, deployment gates, and learning/interview milestones.
 - `master` release workflow: tests, ARM64 image build, container smoke checks, GHCR publishing,
   and optional Mac mini deployment over Tailscale and SSH.
 - Separate release Compose stack, database backup before migrations, deployment locking,
@@ -21,6 +41,15 @@
 
 ### Changed
 
+- Searches with terms now return the most relevant results first instead of the newest. Pass
+  `sort=newest` for the previous order. Pagination cursors include the ordering.
+- The release image is built for AMD64 and deploys to a cloud server instead of the Mac mini.
+  GitHub settings are renamed: environment `production`, `DEPLOY_HOST`, `DEPLOY_USER`,
+  `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS`, `DEPLOY_ENABLED`, and the new `PUBLIC_URL`.
+- The server `.env` now requires `ATHENA_WEB_DB_PASSWORD`, `ATHENA_INGEST_DB_PASSWORD`, and
+  `ATHENA_DOMAIN`; deployment refuses to start without them.
+- The container no longer writes uvicorn access logs, which included client addresses and
+  search terms. Structured request logs are unchanged.
 - OpenAlex imports exclude future publication dates, retracted works, and types other than
   articles, reviews, and preprints.
 - Provider requests retry up to five times with 3–24 second backoff, up from three attempts,
@@ -28,6 +57,7 @@
 
 ### Fixed
 
+- The arXiv option was missing from the source filter on the catalog page.
 - A short arXiv page inside the reported result window is refetched and then fails the run,
   instead of ending the query early and reporting it as completed.
 

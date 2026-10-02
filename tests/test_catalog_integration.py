@@ -202,6 +202,72 @@ def test_pagination_ties_and_new_imports(client, db, record):
     )
 
 
+def test_relevance_ranks_title_matches_first_and_newest_is_separate(client, db, record):
+    def paper(number, **fields):
+        identity = {"source_id": f"2401.{number:05}", "arxiv": f"2401.{number:05}", "doi": None}
+        return record.model_copy(update={**identity, **fields})
+
+    run_import(
+        db,
+        "arxiv",
+        "test",
+        [
+            paper(1, title="Protein folding", abstract="Nothing else.", doi="10.1234/fold"),
+            paper(
+                2,
+                title="A survey of methods",
+                abstract="Protein folding is mentioned once.",
+                publication_date=date(2025, 6, 1),
+            ),
+            paper(3, title="Unrelated work", abstract="Crop yields."),
+        ],
+    )
+    ranked = client.get("/api/papers", params={"q": "protein folding"}).json()
+    assert ranked["sort"] == "relevance"
+    assert [item["title"] for item in ranked["items"]] == ["Protein folding", "A survey of methods"]
+    newest = client.get("/api/papers", params={"q": "protein folding", "sort": "newest"}).json()
+    assert newest["sort"] == "newest"
+    assert [item["title"] for item in newest["items"]] == ["A survey of methods", "Protein folding"]
+    assert client.get("/api/papers").json()["sort"] == "newest"
+    by_doi = client.get("/api/papers", params={"q": "https://doi.org/10.1234/FOLD"}).json()
+    assert [item["title"] for item in by_doi["items"]] == ["Protein folding"]
+    by_arxiv = client.get("/api/papers", params={"q": "arXiv:2401.00003v2"}).json()
+    assert [item["title"] for item in by_arxiv["items"]] == ["Unrelated work"]
+    html = client.get("/", params={"q": "protein folding"}).text
+    assert "Most relevant" in html and "sort=newest" in html
+    assert "Most relevant" not in client.get("/").text
+
+
+def test_relevance_pagination_is_complete_with_tied_scores(client, db, record):
+    records = [
+        record.model_copy(
+            update={
+                "source_id": f"2401.{i:05}",
+                "arxiv": f"2401.{i:05}",
+                "doi": None,
+                # Two score groups with ties inside each, on the same date.
+                "title": "Graph learning" if i % 2 else "Something different",
+                "abstract": "A graph learning study.",
+            }
+        )
+        for i in range(7)
+    ]
+    run_import(db, "arxiv", "test", records)
+    params = {"q": "graph learning", "limit": 2}
+    page = client.get("/api/papers", params=params).json()
+    titles = [item["title"] for item in page["items"]]
+    ids = [item["id"] for item in page["items"]]
+    while page["next_cursor"]:
+        page = client.get("/api/papers", params={**params, "cursor": page["next_cursor"]}).json()
+        titles.extend(item["title"] for item in page["items"])
+        ids.extend(item["id"] for item in page["items"])
+    assert len(ids) == len(set(ids)) == 7
+    assert titles == ["Graph learning"] * 3 + ["Something different"] * 4
+    first = client.get("/api/papers", params=params).json()["next_cursor"]
+    mismatched = client.get("/api/papers", params={**params, "sort": "newest", "cursor": first})
+    assert mismatched.status_code == 400
+
+
 def test_stored_html_is_escaped(client, db, record):
     unsafe = record.model_copy(update={"title": "<script>alert('x')</script>"})
     run_import(db, "arxiv", "test", [unsafe])

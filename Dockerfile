@@ -10,4 +10,6 @@ COPY migrations ./migrations
 RUN useradd --create-home athena
 USER athena
 EXPOSE 8000
-CMD ["/app/.venv/bin/uvicorn", "athena.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# The app writes its own structured request logs. Uvicorn's access log would add client
+# addresses and full query strings (search terms), so it is turned off.
+CMD ["/app/.venv/bin/uvicorn", "athena.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]

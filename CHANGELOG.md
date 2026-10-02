@@ -4,6 +4,9 @@
 
 ### Added
 
+- `deploy/bootstrap.sh`: one-time server setup that installs Docker and Tailscale, grants the
+  deployment account Docker access, and creates the server settings file with generated
+  passwords. Rerunning it keeps an existing settings file.
 - Server runbook covering an unreachable site, database trouble, disk pressure, failing
   refreshes and backups, stuck imports, and secret rotation.
 - Connection and resource bounds for the release stack: the web server answers 503 beyond 64

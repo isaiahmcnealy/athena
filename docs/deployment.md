@@ -49,33 +49,40 @@ address. On AWS Lightsail: create an Ubuntu LTS instance, attach a static IP, an
 networking tab allow TCP 80 and 443 from anywhere. Keep TCP 22 restricted to your own
 address until Tailscale is working, then remove it.
 
-Perform these steps **on the server**, using the account that will run Athena:
+[deploy/bootstrap.sh](../deploy/bootstrap.sh) does the server-side setup in one step. It
+installs Docker Engine with the Compose plugin and Tailscale from their own apt
+repositories, lets the `ubuntu` account use Docker, and creates `~/athena/.env` with three
+freshly generated passwords and `ATHENA_DOMAIN`. It is safe to rerun and never replaces an
+existing `.env`. Use either of these:
 
-1. Install Docker Engine with the Compose plugin by following
-   [Docker's Ubuntu instructions](https://docs.docker.com/engine/install/ubuntu/), then
-   allow the account to use it with `sudo usermod -aG docker "$USER"` and sign in again.
-   Membership in the `docker` group is equivalent to root on this server; use a dedicated
-   account. Confirm that `docker info` and `docker compose version` work.
-2. Install Tailscale by following its
-   [Linux instructions](https://tailscale.com/docs/install/linux) and join the server to
-   your tailnet with the `tag:athena-server` tag.
-3. Create the server directory and three separate passwords:
+- **At creation:** paste the script's contents into the instance's launch script field.
+- **Afterwards:** on the server, run
 
-   ```sh
-   mkdir -p ~/athena/logs
-   chmod 700 ~/athena
-   for name in POSTGRES_PASSWORD ATHENA_WEB_DB_PASSWORD ATHENA_INGEST_DB_PASSWORD; do
-     echo "$name=$(openssl rand -hex 32)"
-   done
-   ```
+  ```sh
+  curl -fsSL https://raw.githubusercontent.com/isaiahmcnealy/athena/master/deploy/bootstrap.sh -o bootstrap.sh
+  sudo bash bootstrap.sh
+  ```
 
-4. Create `~/athena/.env` from [deploy/.env.example](../deploy/.env.example). Paste the
-   three generated lines over the placeholders, keeping each value exactly 64 hex
-   characters. Set `ATHENA_DOMAIN`, your contact email, and optionally an OpenAlex API
-   key, then run `chmod 600 ~/athena/.env`. Never commit this file. Do not change
-   `POSTGRES_PASSWORD` after the database has been initialized without also changing the
-   owner role's password in PostgreSQL. The other two passwords are reapplied on every
-   deployment, so changing them in `.env` and redeploying rotates them.
+  Read the downloaded file before running it. Set `ATHENA_ACCOUNT` or `ATHENA_DOMAIN` first
+  if the account is not `ubuntu` or the hostname differs.
+
+Then, **on the server**:
+
+1. Join your tailnet: `sudo tailscale up --advertise-tags=tag:athena-server`.
+2. Sign out and back in, and confirm that `docker info` and `docker compose version` work.
+   Membership in the `docker` group is equivalent to root on this server.
+3. Optionally edit `~/athena/.env` to set your contact email and an OpenAlex API key. Never
+   commit this file. Do not change `POSTGRES_PASSWORD` after the database has been
+   initialized without also changing the owner role's password in PostgreSQL. The other two
+   passwords are reapplied on every deployment, so changing them in `.env` and redeploying
+   rotates them.
+
+To set the server up by hand instead, install Docker Engine from
+[Docker's Ubuntu instructions](https://docs.docker.com/engine/install/ubuntu/) and Tailscale
+from its [Linux instructions](https://tailscale.com/docs/install/linux), create `~/athena`
+and `~/athena/logs` with mode 700, and create `~/athena/.env` (mode 600) from
+[deploy/.env.example](../deploy/.env.example) with three separate `openssl rand -hex 32`
+values.
 
 The application binds to `127.0.0.1:8001` on the server for on-host checks. Public
 traffic reaches it only through the Caddy container on ports 80 and 443.

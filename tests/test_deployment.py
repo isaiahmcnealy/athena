@@ -1,6 +1,7 @@
 """Exercise rollout failure boundaries without connecting to a server or registry."""
 
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -255,3 +256,14 @@ def test_refresh_rejects_an_out_of_range_size(deployment):
     write_env(root, REFRESH_PER_QUERY="5000")
     assert run_job(deployment, "refresh.sh").returncode != 0
     assert not Path(env["DOCKER_LOG"]).exists()
+
+
+def test_bootstrap_writes_every_setting_the_example_documents():
+    def names(text):
+        return {
+            line.split("=", 1)[0] for line in text.splitlines() if re.match(r"[A-Z0-9_]+=", line)
+        }
+
+    script = (DEPLOY / "bootstrap.sh").read_text()
+    template = script.split("<< SETTINGS\n", 1)[1].split("\nSETTINGS\n", 1)[0]
+    assert names(template) == names((DEPLOY / ".env.example").read_text())

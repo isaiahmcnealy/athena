@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import time
 import uuid
 from pathlib import Path
@@ -14,10 +15,13 @@ from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from athena.catalog import CatalogQuery, PaperPage, PaperView, list_papers
+from athena.config import get_settings
 from athena.db import get_session
 from athena.models import Paper, SourceRecord
+from athena.ratelimit import RateLimiter
 
 ROOT = Path(__file__).parent
 app = FastAPI(
@@ -33,8 +37,29 @@ REQUESTS = Counter("athena_http_requests_total", "HTTP responses", ["method", "r
 LATENCY = Histogram("athena_http_duration_seconds", "HTTP latency", ["method", "route"])
 DB = Annotated[Session, Depends(get_session)]
 Filters = Annotated[CatalogQuery, Query()]
+settings = get_settings()
+limiter = (
+    RateLimiter(settings.rate_limit_per_minute) if settings.rate_limit_per_minute > 0 else None
+)
+# Health checks and static assets are cheap and must stay reachable for monitoring.
+UNLIMITED = ("/health/", "/static/")
 
 
+@app.middleware("http")
+async def throttle(request: Request, call_next):
+    if limiter and not request.url.path.startswith(UNLIMITED):
+        # Behind the reverse proxy, uvicorn sets the client from trusted forwarded headers.
+        wait = limiter.retry_after(request.client.host if request.client else "unknown")
+        if wait:
+            return JSONResponse(
+                {"detail": "Too many requests. Wait a moment and try again."},
+                status_code=429,
+                headers={"Retry-After": str(math.ceil(wait))},
+            )
+    return await call_next(request)
+
+
+# Declared after throttle so it wraps it: rejected requests are still counted and logged.
 @app.middleware("http")
 async def observe(request: Request, call_next):
     request_id = str(uuid.uuid4())
@@ -69,6 +94,13 @@ async def observe(request: Request, call_next):
                 }
             )
         )
+
+
+if settings.allowed_hosts.strip() != "*":
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=[host.strip() for host in settings.allowed_hosts.split(",") if host.strip()],
+    )
 
 
 @app.exception_handler(SQLAlchemyError)
@@ -126,6 +158,11 @@ def home(request: Request, session: DB, filters: Filters):
     next_url = (
         "/?" + urlencode({**params, "cursor": page.next_cursor}) if page.next_cursor else None
     )
+    sort_urls = (
+        {sort: "/?" + urlencode({**params, "sort": sort}) for sort in ("relevance", "newest")}
+        if filters.rankable
+        else None
+    )
     return templates.TemplateResponse(
         request=request,
         name="catalog.html",
@@ -135,8 +172,14 @@ def home(request: Request, session: DB, filters: Filters):
             "catalog_count": count,
             "latest": latest,
             "next_url": next_url,
+            "sort_urls": sort_urls,
         },
     )
+
+
+@app.get("/about", response_class=HTMLResponse, include_in_schema=False)
+def about(request: Request):
+    return templates.TemplateResponse(request=request, name="about.html")
 
 
 @app.get("/papers/{paper_id}", response_class=HTMLResponse, include_in_schema=False)

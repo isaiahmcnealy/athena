@@ -7,18 +7,19 @@
   </section>
   <form action="/" method="get" class="search-form" role="search">
     <div class="search-box"><span aria-hidden="true">⌕</span><label class="sr-only" for="q">Search paper titles and abstracts</label><input id="q" type="search" name="q" value="{{ filters.q }}" placeholder="Search ideas, methods, or applications…" maxlength="300"><button type="submit">Search <span aria-hidden="true">→</span></button></div>
+    {% if filters.sort %}<input type="hidden" name="sort" value="{{ filters.sort }}">{% endif %}
     <div class="workspace">
       <aside class="filters" aria-label="Search filters">
         <div class="section-heading"><h2>Refine your search</h2><a href="/">Reset</a></div>
-        <label for="source">SOURCE</label><select id="source" name="source"><option value="">All sources</option value="arxiv" {% if filters.source == 'arxiv' %}selected{% endif %}>arXiv</option><option value="openalex" {% if filters.source == 'openalex' %}selected{% endif %}>OpenAlex</option></select>
+        <label for="source">SOURCE</label><select id="source" name="source"><option value="">All sources</option><option value="arxiv" {% if filters.source == 'arxiv' %}selected{% endif %}>arXiv</option><option value="openalex" {% if filters.source == 'openalex' %}selected{% endif %}>OpenAlex</option></select>
         <label for="year">PUBLICATION YEAR</label><input id="year" name="year" type="number" min="1900" max="2100" value="{{ filters.year or '' }}" placeholder="Any year">
         <label for="venue">JOURNAL OR VENUE</label><input id="venue" name="venue" maxlength="200" value="{{ filters.venue }}" placeholder="e.g. Nature Medicine">
         <button type="submit" class="filter-button">Apply filters</button>
         <div class="sidebar-note"><span class="note-symbol" aria-hidden="true">✳</span><h3>A wider perspective.</h3><p>Explore AI through the fields it touches. Start with a question that interests you.</p></div>
-        <div class="suggestions"><p>EXPLORE AN IDEA</p><a href="/?q=drug+discovery">Drug discovery <span>↗</span></a><a href="/?q=computer+vision">Computer vision <span>↗</span></a><a href="/?q=financial">Financial systems <span>↗</span></a></div>
+        <div class="suggestions"><p>EXPLORE AN IDEA</p><a href="/?q=drug+discovery">Drug discovery <span>↗</span></a><a href="/?q=computer+vision">Computer vision <span>↗</span></a><a href="/?q=financial">Financial systems <span>↗</span></a><a href="/?q=energy">Energy <span>↗</span></a><a href="/?q=%22oil+and+gas%22+OR+petroleum+OR+hydrocarbon">Oil and gas <span>↗</span></a></div>
       </aside>
       <section class="results" aria-label="Research papers">
-        <div class="results-heading"><div><p class="eyebrow">THE READING ROOM</p><h2>{% if filters.q %}Search results{% else %}Explore the catalog{% endif %} <span>{{ "{:,}".format(page.total) }}</span></h2></div><span class="sort-label">Newest published first ↓</span></div>
+        <div class="results-heading"><div><p class="eyebrow">THE READING ROOM</p><h2>{% if filters.q %}Search results{% else %}Explore the catalog{% endif %} <span>{{ "{:,}".format(page.total) }}</span></h2></div>{% if sort_urls %}<nav class="sort-options" aria-label="Sort results"><span>Sort</span><a href="{{ sort_urls.relevance }}"{% if page.sort == 'relevance' %} class="sort-active" aria-current="true"{% endif %}>Most relevant</a><a href="{{ sort_urls.newest }}"{% if page.sort == 'newest' %} class="sort-active" aria-current="true"{% endif %}>Newest</a></nav>{% else %}<span class="sort-label">Newest published first ↓</span>{% endif %}</div>
         {% for paper in page.items %}
         <article class="paper-card">
           <div class="paper-meta"><span class="source-badge">{{ 'arXiv' if paper.primary_source == 'arxiv' else 'OpenAlex' }}</span><time datetime="{{ paper.publication_date }}">{{ paper.publication_date.strftime('%b %d, %Y') }}</time><span class="work-type">{{ paper.work_type.replace('-', ' ') }}</span></div>

@@ -1,0 +1,30 @@
+name: Uptime
+
+# A basic external check of the public site. GitHub emails the repository owner when it
+# fails. Scheduled runs can be delayed, and GitHub pauses them after 60 days without
+# repository activity, so this complements a dedicated monitor rather than replacing one.
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  check:
+    # Set the repository variable PUBLIC_URL (for example https://athena.example.com) to enable.
+    if: vars.PUBLIC_URL != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PUBLIC_URL: ${{ vars.PUBLIC_URL }}
+    steps:
+      - name: Readiness, including the database
+        run: |
+          curl --fail --silent --show-error --max-time 20 --retry 2 --retry-delay 10 \
+            --retry-all-errors "$PUBLIC_URL/health/ready" > /dev/null
+      - name: Catalog is not empty
+        run: |
+          total=$(curl --fail --silent --show-error --max-time 20 "$PUBLIC_URL/api/papers?limit=1" \
+            | python3 -c 'import json, sys; print(json.load(sys.stdin)["total"])')
+          test "$total" -gt 0

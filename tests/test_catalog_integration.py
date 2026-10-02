@@ -1,14 +1,89 @@
+import hashlib
 from datetime import date, timedelta
 
 import pytest
-from sqlalchemy import func, select
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
-from athena.ingestion.providers import ProviderError
+from athena.ingestion.audit import catalog_audit
+from athena.ingestion.providers import ProviderError, parse_openalex
 from athena.ingestion.service import IdentityConflict, run_import, upsert_paper
+from athena.ingestion.stats import catalog_stats
 from athena.models import Identifier, ImportRun, Paper, SourceRecord
 
 pytestmark = pytest.mark.integration
+
+
+def test_stats_counts_canonical_papers_and_reports_storage(db, record):
+    run_import(db, "arxiv", "stats", [record])
+    run_import(db, "arxiv", "stats replay", [record])
+    stats = catalog_stats(db)
+    assert stats["papers"] == 1
+    assert stats["source_records"] == 1
+    assert stats["identifier_keys"] == 2
+    assert stats["database_bytes"] >= stats["catalog_bytes"] > 0
+    assert any(row["index_bytes"] > 0 for row in stats["relations"])
+
+
+def test_audit_reports_coverage_and_flags_records_for_review(db, record):
+    def paper(number, **fields):
+        identity = {"source_id": f"2401.{number:05}", "arxiv": f"2401.{number:05}", "doi": None}
+        return record.model_copy(update={**identity, **fields})
+
+    openalex = record.model_copy(
+        update={
+            "source": "openalex",
+            "source_id": "W9",
+            "arxiv": None,
+            "doi": "10.48550/arxiv.2401.00002",
+            "title": "A title-only record",
+            "abstract": None,
+            "venue": None,
+            "landing_url": "https://openalex.org/W9",
+            "work_type": "article",
+        }
+    )
+    run_import(db, "arxiv", "audit", [paper(1), paper(2, title=record.title.upper())])
+    # Written directly: the importer would merge this record through its arXiv DOI.
+    with Session(db) as session, session.begin():
+        stray = Paper(
+            **openalex.model_dump(include={"title", "authors", "topics", "publication_date"}),
+            doi=openalex.doi,
+            primary_source="openalex",
+            landing_url=openalex.landing_url,
+            work_type="article",
+        )
+        session.add(stray)
+    before = catalog_stats(db)
+    report = catalog_audit(db)
+    assert report["totals"]["papers"] == 3
+    assert report["totals"]["latest_publication"] == record.publication_date
+    assert report["source_coverage"] == [{"sources": "arxiv", "papers": 2}]
+    assert report["by_year"] == [{"year": 2024, "papers": 3}]
+    text_rows = {row["primary_source"]: row for row in report["text_availability"]}
+    assert text_rows["openalex"]["without_abstract"] == 1
+    assert text_rows["arxiv"]["without_abstract"] == 0
+    assert report["top_topics"][0] == {"topic": "cs.LG", "papers": 3}
+    assert report["checks"] == {
+        "future_publication_dates": 0,
+        "papers_sharing_a_title": 2,
+        "titles_shared_by_several_papers": 1,
+        "unmerged_arxiv_doi_pairs": 1,
+        "papers_without_a_source_record": 1,
+        "papers_without_an_identifier": 1,
+        "imports_left_running": 0,
+        "records_rejected_for_identity_conflicts": 0,
+    }
+    assert catalog_stats(db)["papers"] == before["papers"]
+
+
+def test_audit_of_an_empty_catalog_reports_zeroes(db):
+    report = catalog_audit(db)
+    assert report["totals"]["papers"] == 0
+    assert report["by_year"] == []
+    assert set(report["checks"].values()) == {0}
 
 
 def test_replay_is_idempotent(session, record):
@@ -42,6 +117,102 @@ def test_cross_source_doi_dedup_keeps_arxiv_abstract(session, record):
     assert paper.venue == "Journal of Tests"
     assert session.scalar(select(func.count()).select_from(Paper)) == 1
     assert session.scalar(select(func.count()).select_from(SourceRecord)) == 2
+
+
+@pytest.mark.parametrize("openalex_first", [False, True])
+def test_cross_source_arxiv_link_deduplicates_without_doi(session, record, openalex_first):
+    arxiv = record.model_copy(update={"doi": None})
+    openalex = parse_openalex(
+        {
+            "id": "https://openalex.org/W123",
+            "title": "Alternate metadata title",
+            "publication_date": "2024-01-01",
+            "locations": [{"landing_page_url": "https://arxiv.org/abs/2401.00001v2"}],
+        }
+    )
+    records = [openalex, arxiv] if openalex_first else [arxiv, openalex]
+    for item in records:
+        upsert_paper(session, item)
+        session.commit()
+    assert session.scalar(select(func.count()).select_from(Paper)) == 1
+    assert session.scalar(select(func.count()).select_from(SourceRecord)) == 2
+    assert session.scalar(select(Paper.title)) == record.title
+    assert session.scalar(select(Paper.abstract)) == record.abstract
+
+
+def test_replay_keeps_the_content_revision_and_a_text_change_advances_it(session, record):
+    upsert_paper(session, record)
+    session.commit()
+    first = session.scalar(select(Paper))
+    original = (first.content_hash, first.content_changed_at, first.updated_at)
+    assert first.content_revision == 1
+    expected = hashlib.md5(f"{record.title}\n{record.abstract}".encode()).hexdigest()
+    assert first.content_hash == expected
+
+    upsert_paper(session, record)
+    session.commit()
+    session.refresh(first)
+    assert (first.content_revision, first.content_hash) == (1, original[0])
+    assert first.content_changed_at == original[1]
+    assert first.updated_at > original[2]
+
+    revised = record.model_copy(
+        update={
+            "abstract": "A corrected abstract.",
+            "source_updated_at": record.source_updated_at + timedelta(days=1),
+        }
+    )
+    upsert_paper(session, revised)
+    session.commit()
+    session.refresh(first)
+    assert first.content_revision == 2
+    assert first.content_hash != original[0]
+    assert first.content_changed_at > original[1]
+
+
+def test_metadata_from_a_second_source_does_not_advance_the_content_revision(session, record):
+    upsert_paper(session, record)
+    session.commit()
+    openalex = record.model_copy(
+        update={
+            "source": "openalex",
+            "source_id": "W1",
+            "arxiv": None,
+            "title": "Other title",
+            "abstract": None,
+            "venue": "Journal of Tests",
+            "landing_url": "https://openalex.org/W1",
+        }
+    )
+    upsert_paper(session, openalex)
+    session.commit()
+    paper = session.scalar(select(Paper))
+    assert paper.venue == "Journal of Tests"
+    assert paper.content_revision == 1
+
+
+def test_content_migration_backfills_existing_papers(db):
+    config = Config("alembic.ini")
+    command.downgrade(config, "0001")
+    try:
+        with db.begin() as connection:
+            connection.execute(
+                text("""
+                    INSERT INTO papers (id, title, abstract, authors, topics, publication_date,
+                        primary_source, landing_url, work_type, updated_at)
+                    VALUES (gen_random_uuid(), 'Title only', NULL, '[]', '[]', '2024-01-01',
+                        'openalex', 'https://openalex.org/W1', 'article', '2024-02-03T00:00:00Z')
+                """)
+            )
+    finally:
+        command.upgrade(config, "head")
+    with db.connect() as connection:
+        row = connection.execute(
+            text(
+                "SELECT content_hash, content_revision, content_changed_at = updated_at FROM papers"
+            )
+        ).one()
+    assert tuple(row) == (hashlib.md5(b"Title only\n").hexdigest(), 1, True)
 
 
 def test_older_version_does_not_overwrite(session, record):
@@ -169,6 +340,72 @@ def test_pagination_ties_and_new_imports(client, db, record):
     )
 
 
+def test_relevance_ranks_title_matches_first_and_newest_is_separate(client, db, record):
+    def paper(number, **fields):
+        identity = {"source_id": f"2401.{number:05}", "arxiv": f"2401.{number:05}", "doi": None}
+        return record.model_copy(update={**identity, **fields})
+
+    run_import(
+        db,
+        "arxiv",
+        "test",
+        [
+            paper(1, title="Protein folding", abstract="Nothing else.", doi="10.1234/fold"),
+            paper(
+                2,
+                title="A survey of methods",
+                abstract="Protein folding is mentioned once.",
+                publication_date=date(2025, 6, 1),
+            ),
+            paper(3, title="Unrelated work", abstract="Crop yields."),
+        ],
+    )
+    ranked = client.get("/api/papers", params={"q": "protein folding"}).json()
+    assert ranked["sort"] == "relevance"
+    assert [item["title"] for item in ranked["items"]] == ["Protein folding", "A survey of methods"]
+    newest = client.get("/api/papers", params={"q": "protein folding", "sort": "newest"}).json()
+    assert newest["sort"] == "newest"
+    assert [item["title"] for item in newest["items"]] == ["A survey of methods", "Protein folding"]
+    assert client.get("/api/papers").json()["sort"] == "newest"
+    by_doi = client.get("/api/papers", params={"q": "https://doi.org/10.1234/FOLD"}).json()
+    assert [item["title"] for item in by_doi["items"]] == ["Protein folding"]
+    by_arxiv = client.get("/api/papers", params={"q": "arXiv:2401.00003v2"}).json()
+    assert [item["title"] for item in by_arxiv["items"]] == ["Unrelated work"]
+    html = client.get("/", params={"q": "protein folding"}).text
+    assert "Most relevant" in html and "sort=newest" in html
+    assert "Most relevant" not in client.get("/").text
+
+
+def test_relevance_pagination_is_complete_with_tied_scores(client, db, record):
+    records = [
+        record.model_copy(
+            update={
+                "source_id": f"2401.{i:05}",
+                "arxiv": f"2401.{i:05}",
+                "doi": None,
+                # Two score groups with ties inside each, on the same date.
+                "title": "Graph learning" if i % 2 else "Something different",
+                "abstract": "A graph learning study.",
+            }
+        )
+        for i in range(7)
+    ]
+    run_import(db, "arxiv", "test", records)
+    params = {"q": "graph learning", "limit": 2}
+    page = client.get("/api/papers", params=params).json()
+    titles = [item["title"] for item in page["items"]]
+    ids = [item["id"] for item in page["items"]]
+    while page["next_cursor"]:
+        page = client.get("/api/papers", params={**params, "cursor": page["next_cursor"]}).json()
+        titles.extend(item["title"] for item in page["items"])
+        ids.extend(item["id"] for item in page["items"])
+    assert len(ids) == len(set(ids)) == 7
+    assert titles == ["Graph learning"] * 3 + ["Something different"] * 4
+    first = client.get("/api/papers", params=params).json()["next_cursor"]
+    mismatched = client.get("/api/papers", params={**params, "sort": "newest", "cursor": first})
+    assert mismatched.status_code == 400
+
+
 def test_stored_html_is_escaped(client, db, record):
     unsafe = record.model_copy(update={"title": "<script>alert('x')</script>"})
     run_import(db, "arxiv", "test", [unsafe])
@@ -204,3 +441,114 @@ def test_database_failure_returns_503_and_liveness_survives(client):
     assert "sensitive" not in response.text
     assert client.get("/health/ready").status_code == 503
     assert client.get("/").status_code == 503
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"q": "x" * 301},
+        {"venue": "x" * 201},
+        {"cursor": "x" * 1025},
+        {"year": "abc"},
+        {"year": 1800},
+        {"source": "evil"},
+        {"sort": "bogus"},
+        {"limit": 0},
+        {"limit": "ten"},
+    ],
+)
+def test_oversized_and_malformed_filters_are_rejected_before_the_database(client, params):
+    assert client.get("/api/papers", params=params).status_code == 422
+    assert client.get("/", params=params).status_code == 422
+
+
+@pytest.mark.parametrize(
+    "terms",
+    [
+        "'; DROP TABLE papers; --",
+        '" OR 1=1 --',
+        '"unterminated phrase OR -',
+        "((( & | ! <->",
+        "%_\\",
+        "graph\x00neural",
+        "‮graph﻿",
+    ],
+)
+def test_hostile_search_terms_are_treated_as_text(client, db, record, terms):
+    run_import(db, "arxiv", "test", [record])
+    for path in ("/api/papers", "/"):
+        assert client.get(path, params={"q": terms}).status_code == 200
+        assert client.get(path, params={"venue": terms}).status_code == 200
+    assert client.get("/api/papers").json()["total"] == 1
+
+
+def test_venue_wildcards_match_literally(client, db, record):
+    run_import(db, "arxiv", "test", [record.model_copy(update={"venue": "Journal of Tests"})])
+    assert client.get("/api/papers", params={"venue": "journal"}).json()["total"] == 1
+    assert client.get("/api/papers", params={"venue": "%"}).json()["total"] == 0
+    assert client.get("/api/papers", params={"venue": "J_urnal"}).json()["total"] == 0
+
+
+def test_tampered_cursors_are_rejected(client, db, record):
+    import base64
+    import json
+
+    records = [
+        record.model_copy(
+            update={"source_id": f"2401.{i:05}", "arxiv": f"2401.{i:05}", "doi": None}
+        )
+        for i in range(3)
+    ]
+    run_import(db, "arxiv", "test", records)
+    cursor = client.get("/api/papers?limit=1").json()["next_cursor"]
+    payload = json.loads(base64.urlsafe_b64decode(cursor))
+    for change in (
+        {"id": "not-a-uuid"},
+        {"date": "yesterday"},
+        {"snapshot": "2024-01-01T00:00:00"},
+        {"v": 2},
+        {"filter": "0" * 16},
+        {"id": ["nested"]},
+    ):
+        forged = base64.urlsafe_b64encode(json.dumps({**payload, **change}).encode()).decode()
+        assert client.get("/api/papers", params={"limit": 1, "cursor": forged}).status_code == 400
+    ranked = client.get("/api/papers", params={"q": "graph", "limit": 1}).json()["next_cursor"]
+    payload = json.loads(base64.urlsafe_b64decode(ranked))
+    for score in ("high", None, [1], float("nan"), float("inf")):
+        forged = base64.urlsafe_b64encode(json.dumps({**payload, "score": score}).encode()).decode()
+        response = client.get("/api/papers", params={"q": "graph", "limit": 1, "cursor": forged})
+        assert response.status_code == 400
+
+
+def test_reflected_and_stored_values_cannot_inject_markup(client, db, record):
+    hostile = record.model_copy(
+        update={
+            "doi": '10.1234/"><script>alert(1)</script>',
+            "venue": "<img src=x onerror=alert(1)>",
+            "authors": ["<b>Author</b>"],
+            "topics": ["<i>topic</i>"],
+        }
+    )
+    run_import(db, "arxiv", "test", [hostile])
+    paper_id = client.get("/api/papers").json()["items"][0]["id"]
+    probe = '"><script>alert(2)</script>'
+    pages = [
+        client.get("/", params={"q": probe, "venue": probe}).text,
+        client.get("/").text,
+        client.get(f"/papers/{paper_id}").text,
+    ]
+    for html in pages:
+        assert "<script>alert" not in html
+        assert "<img src=x" not in html
+        assert "<b>Author" not in html and "<i>topic" not in html
+    detail = pages[2]
+    assert detail.count('target="_blank"') == detail.count('rel="noopener noreferrer"') >= 2
+
+
+def test_security_headers_cover_pages_errors_and_the_api(client):
+    for path in ("/", "/about", "/api/papers", "/papers/not-a-uuid", "/missing"):
+        headers = client.get(path).headers
+        assert headers["X-Content-Type-Options"] == "nosniff"
+        assert headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
+        assert "frame-ancestors 'none'" in headers["Content-Security-Policy"]
+        assert "script-src" not in headers["Content-Security-Policy"]  # default-src 'self' applies

@@ -4,9 +4,10 @@ A research paper discovery and recommendation platform built on arXiv and OpenAl
 Athena starts with a searchable, populated catalog and evolves toward semantic retrieval
 and personalized recommendations with production-oriented ML infrastructure.
 
-**Release 0.1:** catalog ingestion, PostgreSQL full-text search, filtering, paper details,
-source provenance, import run tracking, health checks, request metrics, and a responsive UI.
-Recommendations, accounts, and reading collections are planned; they are not implemented yet.
+**Release 0.1:** catalog ingestion, PostgreSQL full-text search with relevance and newest
+ordering, filtering, paper details, source provenance, import run tracking, health checks,
+request metrics, and a responsive UI. Recommendations, accounts, and reading collections are
+planned; they are not implemented yet.
 
 ## Quick start
 
@@ -28,8 +29,9 @@ to identify your importer. A small keyless import may work within the provider's
 allowance. A provider failure never prevents browsing records already imported.
 
 Default database credentials and loopback port bindings are **local development only**.
-This release is not a hardened public deployment. Do not expose the database or metrics
-endpoint publicly. See [operations](docs/operations.md) before deployment.
+Do not expose this stack, its database, or its metrics endpoint publicly. The public
+deployment uses a separate release stack with HTTPS, limited database roles, and request
+limits; see the [deployment guide](docs/deployment.md).
 
 ## Local Python development
 
@@ -47,6 +49,29 @@ uv run uvicorn athena.main:app --reload
 Use either the containerized web server or the local Python server on port 8000, not both.
 The `.env` database URL uses PostgreSQL on host port **5433** to avoid common local conflicts.
 
+## Catalog expansion
+
+```sh
+uv run athena seed --dry-run --per-query 250   # print the 42-query plan; no network or database
+uv run athena seed --per-query 250             # request up to 10,500 records
+uv run athena stats                            # actual paper counts and storage in bytes
+uv run athena audit                            # coverage and data quality checks; read-only
+```
+
+`athena seed` runs one curated query per source for each of 21 topics, covering core AI areas
+and industry applications. The default of 125 records per query requests 5,250 records;
+`--per-query 250` requests 10,500. Requested records are an upper bound, not a unique-paper
+count: queries overlap, and records that share an identifier resolve to one paper. Report
+catalog size from `athena stats`, not from the request budget.
+
+Requests are sequential and paced. A failed query stops the batch and prints the job number;
+resume with the same settings and `--start-at N`. `--source arxiv|openalex` limits the plan to
+one provider. Through Compose, rebuild the image first, then run
+`docker compose run --rm ingest seed --per-query 250`.
+
+See [operations](docs/operations.md#catalog-expansion) for the measured 10,000-record trial,
+provider budgets, and recovery steps.
+
 ## Tests
 
 ```sh
@@ -63,24 +88,40 @@ Tests without `TEST_DATABASE_URL` explicitly skip database integration tests.
 
 ## API
 
-- `GET /api/papers?q=graph+neural&source=arxiv&year=2025&limit=12`
+- `GET /api/papers?q=graph+neural&source=arxiv&year=2025&sort=relevance&limit=12`
 - `GET /api/papers/{id}`
 - `GET /health/live`: process liveness, independent of database availability
 - `GET /health/ready`: database connectivity and catalog schema availability
 - `GET /metrics`: Prometheus HTTP counts and latency histograms
 
 Search matches title and available abstract using PostgreSQL English full-text search.
-Results sort by publication date, then stable internal ID; they do not claim learned relevance.
-Follow the returned `next_cursor` with the same filters. New imports are excluded from an
+With search terms, results default to `sort=relevance`: PostgreSQL `ts_rank`, a lexical score
+in which title matches count more than abstract matches, with ties broken by publication date
+and then stable internal ID. It is not a learned or personalized ranking, and records without
+an abstract are scored on their title alone. `sort=newest` orders by publication date. Browsing
+without search terms is always newest first. The response's `sort` field names the ordering
+that was applied. A query that is a DOI or an arXiv identifier (`10.1234/example`,
+`arXiv:2401.00001`) looks up that exact work instead of searching text.
+Follow the returned `next_cursor` with the same filters and sort. New imports are excluded from an
 existing pagination session. Concurrent metadata edits are not snapshot-isolated across requests.
 The venue filter searches source-provided journal/venue text; author search is not yet implemented.
 
 ## Ingestion guarantees and limits
 
-- Bounded queries, 1–1,000 records per run; provider pagination, timeouts, limited retries,
-  and backoff. arXiv calls are sequential with at least 3 seconds between pages/retries.
+- Bounded queries, 1–1,000 records per run; provider pagination, timeouts, and up to five
+  attempts per request with 3–24 second backoff. arXiv calls are sequential with at least
+  3 seconds between pages/retries. A longer provider-requested cooldown stops the import.
+- An arXiv page shorter than the result count the feed reports is refetched, then fails the
+  run visibly, instead of silently truncating the import.
+- OpenAlex imports exclude future publication dates, retracted works, and types other than
+  articles, reviews, and preprints.
 - Each accepted record and its import progress commit in one database transaction.
 - Identifiers, including normalized DOI, deduplicate records. Titles never drive automatic merges.
+- An OpenAlex work that points to exactly one arXiv identifier, through an arxiv.org link or
+  an arXiv DOI (`10.48550/arXiv.<id>`), shares that paper with the arXiv record. Works with
+  conflicting arXiv identifiers are not auto-merged.
+- Each paper has a content hash and revision covering its title and abstract. Replaying an
+  unchanged record updates the fetch time only; the revision advances when the text changes.
 - Older source versions cannot overwrite newer source records. Conflicting identifiers fail
   reconciliation safely instead of silently merging two existing works.
 - Latest accepted source payloads and fetch times are stored. This is provenance, **not yet a
@@ -95,7 +136,20 @@ The venue filter searches source-provided journal/venue text; author search is n
 - Ordered author names are stored per paper. Global author disambiguation, venue normalization,
   upstream entity merges, and preprint/publication family resolution are intentionally deferred.
 
-See [architecture](docs/architecture.md) and [operations](docs/operations.md) for next steps.
+## Development and releases
+
+Work on `develop` and run the quick start above for local testing. Release by merging
+`develop` into `master`. A push to `master` runs tests, builds and smoke-tests an AMD64
+container, and publishes it to GitHub Container Registry. Once server setup is enabled,
+the pipeline deploys that exact image to the cloud server over Tailscale and SSH, behind
+HTTPS at `athena.isaiahmcnealy.com`.
+
+The server uses its own database, credentials, and catalog; local development stays on
+port 8000. Deployment starts disabled until the server and GitHub secrets are configured.
+Follow the [server setup and release guide](docs/deployment.md).
+
+See the [documentation index](docs/README.md) for architecture, operations, decisions,
+and the changelog.
 
 ## Data sources
 

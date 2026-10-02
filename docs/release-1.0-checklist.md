@@ -35,7 +35,7 @@ Local verification on 2026-10-02: 81 tests passed, including the PostgreSQL inte
 - [ ] Pick an explicit initial serving and availability target. A single VPS cannot provide host-level high availability. State the measured limits instead of promising enterprise uptime.
   - _Status 2026-10-02:_ ADR 002 states the single-server limit and targets (recovery point 24 hours, recovery time 2 hours). Nothing is measured yet.
 - [ ] Add 1.0 acceptance criteria and the target deployment region, provider, instance size, backup target and monthly budget to an ADR.
-  - _Status 2026-10-02:_ ADR 002 proposes AWS Lightsail in us-east-1, 2 GB, an S3 backup bucket, and about USD 12 per month. The owner has not confirmed these, and 1.0 acceptance criteria are not written.
+  - _Status 2026-10-02:_ ADR 002 records the accepted choice: AWS Lightsail in us-east-1, 2 GB, about USD 12 per month. The S3 backup bucket and billing alert are not confirmed, and 1.0 acceptance criteria are not written.
 
 **Exit evidence:** a reviewed product/release note and one scope that can be completed without unresolved policy or cost decisions.
 
@@ -104,7 +104,7 @@ Local verification on 2026-10-02: 81 tests passed, including the PostgreSQL inte
 ### 5. Move releases from the travel-dependent host
 
 - [ ] Choose an always-on cloud origin. For a lowest-cost first deployment, use a small Linux VPS with Docker Compose and the database on the same private host. Size from measurements; a small app may start around 2 GB for lexical-only service, while database plus resident encoder may require about 4 GB. This is a starting estimate, not a guarantee.
-  - _Status 2026-10-02:_ Proposed in ADR 002 and awaiting the owner's confirmation. No server exists yet.
+  - _Status 2026-10-02:_ Chosen: a dedicated AWS Lightsail server, recorded in ADR 002. The server has not been created yet, and its size is an estimate until measured.
 - [x] Keep public serving independent of the Mac mini. Use the mini for development and optional offline/batch experiments; never make it a live request dependency.
   - _Status 2026-10-02:_ The release stack runs entirely on the cloud server; nothing a request needs is on the Mac mini.
 - [ ] Build a Linux AMD64 image for the chosen x86 VPS. If using ARM compute, verify every runtime image and native dependency is ARM64 compatible. Current `deploy/compose.yaml` explicitly pins `linux/arm64`.

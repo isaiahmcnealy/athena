@@ -1,7 +1,8 @@
 # ADR 002: public preview on an always-on cloud host
 
-Status: proposed. Date: 2026-10-02. The owner still has to confirm the provider, region,
-instance size, backup bucket, and monthly budget marked "to confirm" below.
+Status: accepted. Date: 2026-10-02. The owner chose a dedicated AWS Lightsail server over
+sharing another host. The off-host backup bucket and the billing alert are still marked
+"to confirm" below.
 
 Supersedes the hosting parts of [ADR 001](001-mac-mini-releases.md). The branch model,
 digest-based images, backup before migration, and serialized deployments are unchanged.
@@ -34,8 +35,9 @@ search-only catalog can go live first.
 ### Hosting
 
 - One x86-64 Linux server runs the whole stack with Docker Compose: Caddy for HTTPS,
-  the web application, and PostgreSQL. **To confirm:** AWS Lightsail in `us-east-1`,
-  2 GB memory, Ubuntu LTS, with a static IP.
+  the web application, and PostgreSQL: AWS Lightsail in `us-east-1`, 2 GB memory,
+  Ubuntu LTS, with a static IP. The container memory limits total about 1.4 GB and assume
+  this size; a 1 GB instance would need them lowered.
 - DNS for `athena.isaiahmcnealy.com` is an `A` record in the existing Route 53 zone. No
   other record in the zone changes.
 - Only ports 80 and 443 are public. SSH is reached over Tailscale, and the release
@@ -61,8 +63,8 @@ search-only catalog can go live first.
 - **Monitoring:** a scheduled GitHub Actions check of public readiness and catalog size
   every 15 minutes, which emails the owner on failure, plus the release pipeline's
   post-deploy HTTPS check.
-- **Budget:** **to confirm**, about USD 12 per month for the server plus cents for DNS and
-  backup storage, with a billing alert at USD 20.
+- **Budget:** about USD 12 per month for the server plus cents for DNS and backup storage.
+  **To confirm:** a billing alert at USD 20.
 
 ### Availability statement
 
@@ -73,6 +75,9 @@ a restore drill is recorded on the real host. No uptime percentage is claimed.
 
 ## Alternatives
 
+- **The server that hosts QueueScore:** free, but it belongs to a teammate, and a Cloudflare
+  Tunnel like QueueScore's cannot serve `athena.isaiahmcnealy.com` while that domain's DNS
+  stays on Route 53. Moving the domain's DNS was ruled out to leave the portfolio untouched.
 - **Managed platform (Render, Fly.io, Railway):** less server upkeep, but the existing
   SSH-and-Compose pipeline would be replaced, and always-on plans with a managed database
   cost about the same or more.

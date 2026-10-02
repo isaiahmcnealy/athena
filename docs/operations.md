@@ -30,7 +30,13 @@ capture or exactly-once source delivery. Do not run load tests against upstream 
 athena seed --dry-run --per-query 250   # the plan only; no network or database access
 athena seed --per-query 250             # 42 queries, up to 10,500 requested records
 athena stats                            # counts and storage after the run
+athena audit                            # coverage by source, year, and type, plus quality checks
 ```
+
+`athena audit` runs in one read-only transaction. It reports which fields are missing by
+source and counts records that need review, such as papers sharing a title or imports left
+running. It repairs nothing. The latest recorded run is the
+[2026-10-02 catalog audit](reports/catalog-audit-2026-10-02.md).
 
 Take a backup first (see below). The seed runs 21 topics against arXiv and OpenAlex, one query
 at a time, and prints one JSON event per query. `inserted` counts new canonical papers;

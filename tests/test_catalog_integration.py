@@ -4,6 +4,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from athena.ingestion.audit import catalog_audit
 from athena.ingestion.providers import ProviderError, parse_openalex
 from athena.ingestion.service import IdentityConflict, run_import, upsert_paper
 from athena.ingestion.stats import catalog_stats
@@ -21,6 +22,65 @@ def test_stats_counts_canonical_papers_and_reports_storage(db, record):
     assert stats["identifier_keys"] == 2
     assert stats["database_bytes"] >= stats["catalog_bytes"] > 0
     assert any(row["index_bytes"] > 0 for row in stats["relations"])
+
+
+def test_audit_reports_coverage_and_flags_records_for_review(db, record):
+    def paper(number, **fields):
+        identity = {"source_id": f"2401.{number:05}", "arxiv": f"2401.{number:05}", "doi": None}
+        return record.model_copy(update={**identity, **fields})
+
+    openalex = record.model_copy(
+        update={
+            "source": "openalex",
+            "source_id": "W9",
+            "arxiv": None,
+            "doi": "10.48550/arxiv.2401.00002",
+            "title": "A title-only record",
+            "abstract": None,
+            "venue": None,
+            "landing_url": "https://openalex.org/W9",
+            "work_type": "article",
+        }
+    )
+    run_import(db, "arxiv", "audit", [paper(1), paper(2, title=record.title.upper())])
+    # Written directly: the importer would merge this record through its arXiv DOI.
+    with Session(db) as session, session.begin():
+        stray = Paper(
+            **openalex.model_dump(include={"title", "authors", "topics", "publication_date"}),
+            doi=openalex.doi,
+            primary_source="openalex",
+            landing_url=openalex.landing_url,
+            work_type="article",
+        )
+        session.add(stray)
+    before = catalog_stats(db)
+    report = catalog_audit(db)
+    assert report["totals"]["papers"] == 3
+    assert report["totals"]["latest_publication"] == record.publication_date
+    assert report["source_coverage"] == [{"sources": "arxiv", "papers": 2}]
+    assert report["by_year"] == [{"year": 2024, "papers": 3}]
+    text_rows = {row["primary_source"]: row for row in report["text_availability"]}
+    assert text_rows["openalex"]["without_abstract"] == 1
+    assert text_rows["arxiv"]["without_abstract"] == 0
+    assert report["top_topics"][0] == {"topic": "cs.LG", "papers": 3}
+    assert report["checks"] == {
+        "future_publication_dates": 0,
+        "papers_sharing_a_title": 2,
+        "titles_shared_by_several_papers": 1,
+        "unmerged_arxiv_doi_pairs": 1,
+        "papers_without_a_source_record": 1,
+        "papers_without_an_identifier": 1,
+        "imports_left_running": 0,
+        "records_rejected_for_identity_conflicts": 0,
+    }
+    assert catalog_stats(db)["papers"] == before["papers"]
+
+
+def test_audit_of_an_empty_catalog_reports_zeroes(db):
+    report = catalog_audit(db)
+    assert report["totals"]["papers"] == 0
+    assert report["by_year"] == []
+    assert set(report["checks"].values()) == {0}
 
 
 def test_replay_is_idempotent(session, record):

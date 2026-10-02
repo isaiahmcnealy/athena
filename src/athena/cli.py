@@ -6,6 +6,7 @@ import httpx
 
 from athena.config import get_settings
 from athena.db import get_engine
+from athena.ingestion.audit import catalog_audit
 from athena.ingestion.providers import ProviderError, ScholarlyClient, fetch_arxiv, fetch_openalex
 from athena.ingestion.seed import seed_plan
 from athena.ingestion.service import run_import
@@ -13,7 +14,8 @@ from athena.ingestion.stats import catalog_stats
 
 
 def emit(event, *, error=False):
-    print(json.dumps(event), file=sys.stderr if error else sys.stdout, flush=True)
+    # default=str renders the dates in reports; counts and text are unaffected.
+    print(json.dumps(event, default=str), file=sys.stderr if error else sys.stdout, flush=True)
 
 
 def import_query(http, settings, job):
@@ -69,6 +71,9 @@ def main(argv=None):
     commands.add_parser(
         "stats", help="Report actual catalog counts and PostgreSQL storage in bytes"
     )
+    commands.add_parser(
+        "audit", help="Report catalog coverage and data quality checks; changes nothing"
+    )
     ingest = commands.add_parser("ingest", help="Import a bounded query; safe to rerun")
     ingest.add_argument("source", choices=["arxiv", "openalex"])
     ingest.add_argument("--query", help="arXiv search syntax or OpenAlex search terms")
@@ -81,9 +86,10 @@ def main(argv=None):
     )
     seed.add_argument("--dry-run", action="store_true", help="Print the plan without network or DB")
     args = parser.parse_args(argv)
-    if args.command == "stats":
+    if args.command in {"stats", "audit"}:
+        report = catalog_stats if args.command == "stats" else catalog_audit
         try:
-            emit(catalog_stats(get_engine()))
+            emit(report(get_engine()))
         except Exception as error:
             emit({"status": "failed", "error_type": type(error).__name__}, error=True)
             sys.exit(1)

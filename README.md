@@ -55,6 +55,7 @@ The `.env` database URL uses PostgreSQL on host port **5433** to avoid common lo
 uv run athena seed --dry-run --per-query 250   # print the 42-query plan; no network or database
 uv run athena seed --per-query 250             # request up to 10,500 records
 uv run athena stats                            # actual paper counts and storage in bytes
+uv run athena audit                            # coverage and data quality checks; read-only
 ```
 
 `athena seed` runs one curated query per source for each of 21 topics, covering core AI areas

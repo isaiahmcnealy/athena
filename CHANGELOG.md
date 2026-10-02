@@ -4,6 +4,9 @@
 
 ### Added
 
+- `athena audit`: a read-only report of catalog coverage by source, year, and type, missing
+  fields, and records that need review, with the first recorded audit of the development
+  catalog.
 - Relevance ordering for searches (`sort=relevance`, the default when a query has terms) using
   PostgreSQL `ts_rank`, with "Newest" kept as a separate ordering, a `sort` field in API
   responses, and a sort control on the results page.

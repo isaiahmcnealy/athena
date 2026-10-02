@@ -6,6 +6,8 @@
 - [1.0 public release checklist](release-1.0-checklist.md): launch blockers, acceptance evidence,
   deployment, security, recovery, product, and release sign-off.
 - [Local operations](operations.md): imports, inspection, backups, and recovery experiments.
+- [Catalog audit, 2026-10-02](reports/catalog-audit-2026-10-02.md): coverage, missing fields,
+  duplicates, and what they mean for search and recommendations.
 - [Cloud deployment](deployment.md): branch workflow, server setup, DNS, secrets, releases,
   scheduled refresh and backup, and recovery.
 - [ADR 001: release deployment](decisions/001-mac-mini-releases.md): original Mac mini design;

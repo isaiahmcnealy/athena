@@ -44,7 +44,8 @@ Local verification on 2026-10-02: 81 tests passed, including the PostgreSQL inte
 - [x] Fix the search contract: add a relevance sort using a documented lexical score and preserve “Newest” as a separate sort. Exact title/DOI searches should behave predictably.
   - _Status 2026-10-02:_ Searches with terms default to relevance (PostgreSQL ts_rank, title weighted above abstract) with Newest as a separate sort; a DOI or arXiv ID looks up the exact work. Documented in the README and About page; covered by `test_relevance_ranks_title_matches_first_and_newest_is_separate` and `test_relevance_pagination_is_complete_with_tied_scores`. Known limit: titles containing every term tie, so those fall back to newest first.
 - [ ] Add a curated, versioned evaluation set with a written 0–3 relevance rubric. Begin with at least 30 queries across exact technical phrases, conceptual searches, application areas, foundational work, recent work, rare topics, missing abstracts and restrictive filters. Keep a held-out subset out of tuning.
-- [ ] Record catalog coverage and bias by year, source, topic, publication type and abstract availability. Audit documented duplicates and historical data skew before using offline metrics.
+- [x] Record catalog coverage and bias by year, source, topic, publication type and abstract availability. Audit documented duplicates and historical data skew before using offline metrics.
+  - _Status 2026-10-02:_ Recorded in the [2026-10-02 catalog audit](reports/catalog-audit-2026-10-02.md) for the development catalog, which is where offline metrics will be computed. Main findings: 98% of papers are from 2026, 43% have no abstract, and 204 titles are shared within OpenAlex records.
 - [ ] Choose and pin a compact, suitable text encoder. Record its exact model revision, license, text recipe, dimension, normalization, runtime, and expected memory. Be explicit about title-only records and excluded text.
 - [ ] Generate paper embeddings asynchronously and idempotently. Key them by paper content revision and model revision. A replay of unchanged data should not cause an embedding job.
 - [ ] Start with exact vector similarity and add pgvector to the actual PostgreSQL image, migrations, CI and local Compose. Do not use ANN/HNSW until measurements show it is needed. Compare ANN recall to exact neighbors if it is introduced.
@@ -60,6 +61,7 @@ Local verification on 2026-10-02: 81 tests passed, including the PostgreSQL inte
 ### 3. Make catalog records suitable for public recommendations
 
 - [ ] Produce a fresh read-only catalog audit with totals, source/year/type/topic/abstract distributions, duplicates and identity conflicts. Do not use stale counts as current evidence.
+  - _Status 2026-10-02:_ `athena audit` produces it, and the development catalog's report is recorded. Rerun on the server catalog after seeding; its counts will differ.
 - [ ] Reconcile confirmed duplicates through a backed-up, audited migration that preserves identifiers, source records and links. Do not auto-merge on title alone. Represent preprint/publication families so one work cannot occupy many slots.
 - [ ] Add normalized content hashes and content revisions. Separate “fetched again” from “content changed” so metadata replay cannot cause needless embedding/model churn.
 - [ ] Add explicit `retracted`/withdrawn/suppressed eligibility state, reason, source and checked time. Refresh known works so a retraction can remove a record from search and every candidate path. Filtering retracted works only during new imports is insufficient.

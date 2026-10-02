@@ -1,0 +1,49 @@
+# Release services. Local development continues to use the root compose.yaml.
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: athena
+      POSTGRES_DB: athena
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the server .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U athena -d athena"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  migrate:
+    image: ${ATHENA_IMAGE:?Set ATHENA_IMAGE to the release image digest}
+    platform: linux/arm64
+    profiles: [tools]
+    environment:
+      DATABASE_URL: postgresql+psycopg://athena:${POSTGRES_PASSWORD}@db:5432/athena
+    command: ["/app/.venv/bin/alembic", "upgrade", "head"]
+  web:
+    image: ${ATHENA_IMAGE:?Set ATHENA_IMAGE to the release image digest}
+    platform: linux/arm64
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://athena:${POSTGRES_PASSWORD}@db:5432/athena
+    ports:
+      - "127.0.0.1:${ATHENA_PORT:-8001}:8000"
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=5)"]
+      interval: 5s
+      timeout: 6s
+      retries: 12
+      start_period: 10s
+  ingest:
+    image: ${ATHENA_IMAGE:?Set ATHENA_IMAGE to the release image digest}
+    platform: linux/arm64
+    profiles: [tools]
+    environment:
+      DATABASE_URL: postgresql+psycopg://athena:${POSTGRES_PASSWORD}@db:5432/athena
+      OPENALEX_API_KEY: ${OPENALEX_API_KEY:-}
+      CONTACT_EMAIL: ${CONTACT_EMAIL:-}
+    entrypoint: ["/app/.venv/bin/athena"]
+    command: ["ingest", "arxiv", "--limit", "50"]
+volumes:
+  postgres_data:

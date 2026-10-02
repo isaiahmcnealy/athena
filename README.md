@@ -95,7 +95,19 @@ The venue filter searches source-provided journal/venue text; author search is n
 - Ordered author names are stored per paper. Global author disambiguation, venue normalization,
   upstream entity merges, and preprint/publication family resolution are intentionally deferred.
 
-See [architecture](docs/architecture.md) and [operations](docs/operations.md) for next steps.
+## Development and releases
+
+Work on `develop` and run the quick start above for local testing. Release by merging
+`develop` into `master`. A push to `master` runs tests, builds and smoke-tests an ARM64
+container, and publishes it to GitHub Container Registry. Once server setup is enabled,
+the pipeline deploys that exact image to the Mac mini over Tailscale and SSH.
+
+The Mac mini uses its own database and port 8001; local development stays on port 8000.
+Deployment starts disabled until the server and GitHub secrets are configured.
+Follow the [Mac mini setup and release guide](docs/deployment.md).
+
+See the [documentation index](docs/README.md) for architecture, operations, decisions,
+and the changelog.
 
 ## Data sources
 

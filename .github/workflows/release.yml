@@ -1,0 +1,113 @@
+name: Release
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never interrupt a migration or allow two releases to deploy concurrently.
+concurrency:
+  group: athena-release
+  cancel-in-progress: false
+
+jobs:
+  test:
+    if: github.ref == 'refs/heads/master'
+    uses: ./.github/workflows/ci.yml
+
+  image:
+    needs: test
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.publish.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build ARM64 image
+        run: >-
+          docker build --platform linux/arm64 --tag athena:release
+          --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY"
+          --label "org.opencontainers.image.revision=$GITHUB_SHA" .
+      - name: Test migrations and readiness in the release containers
+        env:
+          ATHENA_IMAGE: athena:release
+          POSTGRES_PASSWORD: ci-disposable-database
+        run: |
+          docker compose -p athena-smoke -f deploy/compose.yaml up -d --wait --wait-timeout 120 db
+          docker compose -p athena-smoke -f deploy/compose.yaml run --rm --no-deps migrate
+          docker compose -p athena-smoke -f deploy/compose.yaml up -d --no-deps --wait --wait-timeout 120 web
+          curl --fail --silent http://127.0.0.1:8001/api/papers > /dev/null
+      - name: Remove disposable test containers
+        if: always()
+        env:
+          ATHENA_IMAGE: athena:release
+          POSTGRES_PASSWORD: ci-disposable-database
+        run: docker compose -p athena-smoke -f deploy/compose.yaml down --volumes
+      - name: Publish the tested image
+        id: publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker tag athena:release "$image:$GITHUB_SHA"
+          docker push "$image:$GITHUB_SHA"
+          digest=$(docker inspect --format='{{index .RepoDigests 0}}' "$image:$GITHUB_SHA")
+          [[ "$digest" =~ ^ghcr\.io/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$ ]]
+          printf 'image=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: image
+    # Repository variable: publishing works before the server has been configured.
+    if: vars.MAC_MINI_DEPLOY_ENABLED == 'true'
+    environment: mac-mini
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      MAC_MINI_HOST: ${{ vars.MAC_MINI_HOST }}
+      MAC_MINI_USER: ${{ vars.MAC_MINI_USER }}
+      ATHENA_IMAGE: ${{ needs.image.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Join the private deployment network
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:athena-ci
+      - name: Configure verified SSH access
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.MAC_MINI_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.MAC_MINI_KNOWN_HOSTS }}
+        run: |
+          [[ "$MAC_MINI_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]]
+          [[ "$MAC_MINI_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          [[ "$ATHENA_IMAGE" =~ ^ghcr\.io/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$ ]]
+          test -n "$SSH_PRIVATE_KEY"
+          test -n "$SSH_KNOWN_HOSTS"
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<'CONFIG'
+          Host *
+            BatchMode yes
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            ConnectTimeout 20
+            ServerAliveInterval 30
+            ServerAliveCountMax 3
+          CONFIG
+      - name: Back up, migrate, and deploy
+        run: |
+          release="$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          target="$MAC_MINI_USER@$MAC_MINI_HOST"
+          ssh "$target" "umask 077; mkdir -p athena/releases/$release"
+          scp deploy/compose.yaml deploy/deploy.sh deploy/manage.sh "$target:athena/releases/$release/"
+          ssh "$target" "bash athena/releases/$release/deploy.sh '$ATHENA_IMAGE'"

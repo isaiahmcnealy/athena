@@ -4,6 +4,9 @@
 
 ### Added
 
+- Connection and resource bounds for the release stack: the web server answers 503 beyond 64
+  requests in flight, gives in-flight requests 20 seconds on shutdown, and every container
+  has a CPU limit. PostgreSQL gets 60 seconds to shut down cleanly.
 - Request-boundary tests for oversized and malformed filters, hostile search terms, literal
   venue wildcards, forged cursors, markup injection through stored and reflected values, and
   security headers on pages, errors, and the API.

@@ -39,7 +39,8 @@ populate that database separately from your laptop's development catalog.
 | SSH | Tailscale only | Remove any public port 22 rule once Tailscale works |
 
 Pages and the API allow 120 requests per client per minute (`RATE_LIMIT_PER_MINUTE`).
-Requests over the limit get `429` with a `Retry-After` header.
+Requests over the limit get `429` with a `Retry-After` header. The web server handles at
+most 64 requests at once and answers `503` beyond that rather than queueing.
 
 ## 1. Create the server
 

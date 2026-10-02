@@ -24,6 +24,9 @@ services:
       timeout: 3s
       retries: 20
     mem_limit: 768m
+    cpus: 1.0
+    # PostgreSQL needs time to finish a clean shutdown and avoid crash recovery on start.
+    stop_grace_period: 60s
     logging: *logging
   migrate:
     image: ${ATHENA_IMAGE:?Set ATHENA_IMAGE to the release image digest}
@@ -54,6 +57,9 @@ services:
       retries: 12
       start_period: 10s
     mem_limit: 512m
+    cpus: 1.0
+    # Longer than the 20 seconds the server gives in-flight requests on shutdown.
+    stop_grace_period: 30s
     security_opt: ["no-new-privileges:true"]
     logging: *logging
   caddy:
@@ -78,6 +84,7 @@ services:
       timeout: 3s
       retries: 12
     mem_limit: 128m
+    cpus: 0.5
     security_opt: ["no-new-privileges:true"]
     logging: *logging
   ingest:
@@ -91,6 +98,8 @@ services:
     entrypoint: ["/app/.venv/bin/athena"]
     command: ["ingest", "arxiv", "--limit", "50"]
     mem_limit: 512m
+    # Imports must not starve the web app on a small server.
+    cpus: 0.5
     logging: *logging
 networks:
   # The proxy and the web app share this network; the database is not attached to it.

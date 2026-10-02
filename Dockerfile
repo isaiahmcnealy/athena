@@ -12,4 +12,6 @@ USER athena
 EXPOSE 8000
 # The app writes its own structured request logs. Uvicorn's access log would add client
 # addresses and full query strings (search terms), so it is turned off.
-CMD ["/app/.venv/bin/uvicorn", "athena.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+# Beyond 64 requests in flight, answer 503 at once instead of queueing behind the database
+# pool. On SIGTERM, stop accepting connections and give in-flight requests 20 seconds.
+CMD ["/app/.venv/bin/uvicorn", "athena.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log", "--limit-concurrency", "64", "--timeout-graceful-shutdown", "20"]

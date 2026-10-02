@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Discover research across artificial intelligence and its applications with Athena.">
+  <title>{% block title %}Athena · Research, connected{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="icon" href="/static/athena.svg" type="image/svg+xml">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Athena home"><img src="/static/athena.svg" width="36" height="36" alt=""><span>athena<span class="brand-dot">.</span></span></a>
+    <span class="brand-caption">A RESEARCH LIBRARY</span>
+    <nav aria-label="Main navigation"><a class="nav-active" href="/">Discover</a><a href="/docs">API docs <span aria-hidden="true">↗</span></a></nav>
+  </header>
+  {% block content %}{% endblock %}
+  <footer><span>ATHENA <span class="footer-divider">/</span> Follow your curiosity.</span><span>Metadata from OpenAlex &amp; arXiv.<br>Thank you to arXiv for use of its open access interoperability.</span></footer>
+</body>
+</html>

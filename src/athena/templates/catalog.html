@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+<main id="main" class="shell">
+  <section class="hero">
+    <div><p class="eyebrow"><span class="tiny-line"></span> IDEAS WORTH EXPLORING</p><h1>Research, <em>connected.</em></h1><p class="hero-copy">Explore the ideas shaping artificial intelligence.<br>Find your next paper. Follow a new direction.</p></div>
+    <div class="catalog-stat"><strong>{{ "{:,}".format(catalog_count) }}</strong><span>papers in your catalog</span>{% if latest %}<small>Synced {{ latest.strftime('%b %d, %Y · %H:%M UTC') }}</small>{% else %}<small>Your library starts here</small>{% endif %}</div>
+  </section>
+  <form action="/" method="get" class="search-form" role="search">
+    <div class="search-box"><span aria-hidden="true">⌕</span><label class="sr-only" for="q">Search paper titles and abstracts</label><input id="q" type="search" name="q" value="{{ filters.q }}" placeholder="Search ideas, methods, or applications…" maxlength="300"><button type="submit">Search <span aria-hidden="true">→</span></button></div>
+    <div class="workspace">
+      <aside class="filters" aria-label="Search filters">
+        <div class="section-heading"><h2>Refine your search</h2><a href="/">Reset</a></div>
+        <label for="source">SOURCE</label><select id="source" name="source"><option value="">All sources</option value="arxiv" {% if filters.source == 'arxiv' %}selected{% endif %}>arXiv</option><option value="openalex" {% if filters.source == 'openalex' %}selected{% endif %}>OpenAlex</option></select>
+        <label for="year">PUBLICATION YEAR</label><input id="year" name="year" type="number" min="1900" max="2100" value="{{ filters.year or '' }}" placeholder="Any year">
+        <label for="venue">JOURNAL OR VENUE</label><input id="venue" name="venue" maxlength="200" value="{{ filters.venue }}" placeholder="e.g. Nature Medicine">
+        <button type="submit" class="filter-button">Apply filters</button>
+        <div class="sidebar-note"><span class="note-symbol" aria-hidden="true">✳</span><h3>A wider perspective.</h3><p>Explore AI through the fields it touches. Start with a question that interests you.</p></div>
+        <div class="suggestions"><p>EXPLORE AN IDEA</p><a href="/?q=drug+discovery">Drug discovery <span>↗</span></a><a href="/?q=computer+vision">Computer vision <span>↗</span></a><a href="/?q=financial">Financial systems <span>↗</span></a></div>
+      </aside>
+      <section class="results" aria-label="Research papers">
+        <div class="results-heading"><div><p class="eyebrow">THE READING ROOM</p><h2>{% if filters.q %}Search results{% else %}Explore the catalog{% endif %} <span>{{ "{:,}".format(page.total) }}</span></h2></div><span class="sort-label">Newest published first ↓</span></div>
+        {% for paper in page.items %}
+        <article class="paper-card">
+          <div class="paper-meta"><span class="source-badge">{{ 'arXiv' if paper.primary_source == 'arxiv' else 'OpenAlex' }}</span><time datetime="{{ paper.publication_date }}">{{ paper.publication_date.strftime('%b %d, %Y') }}</time><span class="work-type">{{ paper.work_type.replace('-', ' ') }}</span></div>
+          <h3><a href="/papers/{{ paper.id }}">{{ paper.title }}<span class="paper-arrow" aria-hidden="true">↗</span></a></h3>
+          <p class="authors">{{ paper.authors[:3] | join(' · ') }}{% if paper.authors|length > 3 %} <span>+{{ paper.authors|length - 3 }} authors</span>{% endif %}</p>
+          {% if paper.abstract %}<p class="abstract-preview">{{ paper.abstract }}</p>{% elif paper.venue %}<p class="abstract-preview">Published in {{ paper.venue }}. Open the paper details to explore the original source.</p>{% else %}<p class="abstract-preview">Explore the publication details and original source.</p>{% endif %}
+          <div class="paper-bottom"><div class="tags">{% for topic in paper.topics[:3] %}<span>{{ topic }}</span>{% endfor %}</div><a class="read-link" href="/papers/{{ paper.id }}">View paper <span aria-hidden="true">→</span></a></div>
+        </article>
+        {% else %}
+        <div class="empty-state"><span aria-hidden="true">◎</span>{% if catalog_count %}<h3>No papers match these filters.</h3><p>Try a broader term or explore all sources.</p><a class="button-link" href="/">Explore the catalog →</a>{% else %}<h3>A home for your next discovery.</h3><p>Your catalog is ready for its first papers. Import research from arXiv or OpenAlex using the setup guide.</p><a class="button-link" href="https://github.com/isaiahmcnealy/athena#quick-start">Open the setup guide ↗</a>{% endif %}</div>
+        {% endfor %}
+        {% if next_url %}<div class="pagination"><a class="button-link" href="{{ next_url }}">Next papers →</a></div>{% endif %}
+      </section>
+    </div>
+  </form>
+</main>
+{% endblock %}

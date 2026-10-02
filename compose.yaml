@@ -1,0 +1,52 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: athena
+      POSTGRES_PASSWORD: athena
+      POSTGRES_DB: athena
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U athena -d athena"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  migrate:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+psycopg://athena:athena@db:5432/athena
+    command: ["/app/.venv/bin/alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+  web:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+psycopg://athena:athena@db:5432/athena
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+  ingest:
+    build: .
+    profiles: ["tools"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://athena:athena@db:5432/athena
+      OPENALEX_API_KEY: ${OPENALEX_API_KEY:-}
+      CONTACT_EMAIL: ${CONTACT_EMAIL:-}
+    entrypoint: ["/app/.venv/bin/athena"]
+    command: ["ingest", "arxiv", "--limit", "50"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+volumes:
+  postgres_data:

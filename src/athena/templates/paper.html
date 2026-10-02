@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}{{ paper.title }} · Athena{% endblock %}
+{% block content %}
+<main id="main" class="detail-shell">
+  <a class="back-link" href="/">← Back to discovery</a>
+  <div class="paper-meta"><span class="source-badge">{{ 'arXiv' if paper.primary_source == 'arxiv' else 'OpenAlex' }}</span><time datetime="{{ paper.publication_date }}">{{ paper.publication_date.strftime('%B %d, %Y') }}</time><span>{{ paper.work_type.replace('-', ' ') }}</span></div>
+  <h1>{{ paper.title }}</h1>
+  <p class="detail-authors">{{ paper.authors | join(' · ') }}</p>
+  {% if paper.venue %}<p class="venue">{{ paper.venue }}</p>{% endif %}
+  <div class="detail-actions"><a class="button-link" href="{{ paper.landing_url }}" target="_blank" rel="noopener noreferrer">Open original source ↗</a>{% if paper.doi %}<a class="doi-link" href="https://doi.org/{{ paper.doi }}" target="_blank" rel="noopener noreferrer">Publisher / DOI ↗</a>{% endif %}</div>
+  <div class="detail-grid"><section><p class="eyebrow">A CLOSER LOOK</p><h2>Abstract</h2>{% if paper.abstract %}<p class="full-abstract">{{ paper.abstract }}</p>{% else %}<p class="full-abstract">An abstract is not available in this catalog. Visit the original source to read more about this paper.</p>{% endif %}<div class="tags">{% for topic in paper.topics %}<span>{{ topic }}</span>{% endfor %}</div></section>
+  <aside class="provenance"><h2>Publication record</h2>{% if paper.doi %}<p class="eyebrow">DOI</p><p>{{ paper.doi }}</p>{% endif %}<p class="eyebrow">INDEXED FROM</p>{% for source in paper.sources %}<p><strong>{{ source.source }}</strong><br>{{ source.source_id }}<br><small>Retrieved {{ source.fetched_at.strftime('%b %d, %Y · %H:%M UTC') }}</small></p>{% endfor %}<p class="record-note">Source metadata may change. Inclusion in this library does not establish peer-review status.</p></aside></div>
+</main>
+{% endblock %}

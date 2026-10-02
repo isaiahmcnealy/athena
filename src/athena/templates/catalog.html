@@ -15,7 +15,7 @@
         <label for="venue">JOURNAL OR VENUE</label><input id="venue" name="venue" maxlength="200" value="{{ filters.venue }}" placeholder="e.g. Nature Medicine">
         <button type="submit" class="filter-button">Apply filters</button>
         <div class="sidebar-note"><span class="note-symbol" aria-hidden="true">✳</span><h3>A wider perspective.</h3><p>Explore AI through the fields it touches. Start with a question that interests you.</p></div>
-        <div class="suggestions"><p>EXPLORE AN IDEA</p><a href="/?q=drug+discovery">Drug discovery <span>↗</span></a><a href="/?q=computer+vision">Computer vision <span>↗</span></a><a href="/?q=financial">Financial systems <span>↗</span></a></div>
+        <div class="suggestions"><p>EXPLORE AN IDEA</p><a href="/?q=drug+discovery">Drug discovery <span>↗</span></a><a href="/?q=computer+vision">Computer vision <span>↗</span></a><a href="/?q=financial">Financial systems <span>↗</span></a><a href="/?q=energy">Energy <span>↗</span></a><a href="/?q=%22oil+and+gas%22+OR+petroleum+OR+hydrocarbon">Oil and gas <span>↗</span></a></div>
       </aside>
       <section class="results" aria-label="Research papers">
         <div class="results-heading"><div><p class="eyebrow">THE READING ROOM</p><h2>{% if filters.q %}Search results{% else %}Explore the catalog{% endif %} <span>{{ "{:,}".format(page.total) }}</span></h2></div><span class="sort-label">Newest published first ↓</span></div>

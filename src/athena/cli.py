@@ -73,7 +73,7 @@ def main(argv=None):
     ingest.add_argument("source", choices=["arxiv", "openalex"])
     ingest.add_argument("--query", help="arXiv search syntax or OpenAlex search terms")
     ingest.add_argument("--limit", type=int, default=50)
-    seed = commands.add_parser("seed", help="Populate a diverse AI catalog across 20 topics")
+    seed = commands.add_parser("seed", help="Populate a diverse AI catalog across 21 topics")
     seed.add_argument("--per-query", type=int, default=125, help="Records per topic and source")
     seed.add_argument("--source", choices=["all", "arxiv", "openalex"], default="all")
     seed.add_argument(
@@ -132,6 +132,7 @@ def main(argv=None):
             {
                 "status": "failed",
                 "error_type": type(error).__name__,
+                "provider_error": str(error) if isinstance(error, ProviderError) else None,
                 "message": "Import stopped. Check the database and provider availability. "
                 "Committed records are preserved; rerun the same query to recover.",
             },

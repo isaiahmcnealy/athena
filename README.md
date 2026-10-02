@@ -47,6 +47,28 @@ uv run uvicorn athena.main:app --reload
 Use either the containerized web server or the local Python server on port 8000, not both.
 The `.env` database URL uses PostgreSQL on host port **5433** to avoid common local conflicts.
 
+## Catalog expansion
+
+```sh
+uv run athena seed --dry-run --per-query 250   # print the 42-query plan; no network or database
+uv run athena seed --per-query 250             # request up to 10,500 records
+uv run athena stats                            # actual paper counts and storage in bytes
+```
+
+`athena seed` runs one curated query per source for each of 21 topics, covering core AI areas
+and industry applications. The default of 125 records per query requests 5,250 records;
+`--per-query 250` requests 10,500. Requested records are an upper bound, not a unique-paper
+count: queries overlap, and records that share an identifier resolve to one paper. Report
+catalog size from `athena stats`, not from the request budget.
+
+Requests are sequential and paced. A failed query stops the batch and prints the job number;
+resume with the same settings and `--start-at N`. `--source arxiv|openalex` limits the plan to
+one provider. Through Compose, rebuild the image first, then run
+`docker compose run --rm ingest seed --per-query 250`.
+
+See [operations](docs/operations.md#catalog-expansion) for the measured 10,000-record trial,
+provider budgets, and recovery steps.
+
 ## Tests
 
 ```sh
@@ -77,10 +99,18 @@ The venue filter searches source-provided journal/venue text; author search is n
 
 ## Ingestion guarantees and limits
 
-- Bounded queries, 1–1,000 records per run; provider pagination, timeouts, limited retries,
-  and backoff. arXiv calls are sequential with at least 3 seconds between pages/retries.
+- Bounded queries, 1–1,000 records per run; provider pagination, timeouts, and up to five
+  attempts per request with 3–24 second backoff. arXiv calls are sequential with at least
+  3 seconds between pages/retries. A longer provider-requested cooldown stops the import.
+- An arXiv page shorter than the result count the feed reports is refetched, then fails the
+  run visibly, instead of silently truncating the import.
+- OpenAlex imports exclude future publication dates, retracted works, and types other than
+  articles, reviews, and preprints.
 - Each accepted record and its import progress commit in one database transaction.
 - Identifiers, including normalized DOI, deduplicate records. Titles never drive automatic merges.
+- An OpenAlex work that points to exactly one arXiv identifier, through an arxiv.org link or
+  an arXiv DOI (`10.48550/arXiv.<id>`), shares that paper with the arXiv record. Works with
+  conflicting arXiv identifiers are not auto-merged.
 - Older source versions cannot overwrite newer source records. Conflicting identifiers fail
   reconciliation safely instead of silently merging two existing works.
 - Latest accepted source payloads and fetch times are stored. This is provenance, **not yet a

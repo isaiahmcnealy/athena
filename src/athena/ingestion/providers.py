@@ -1,3 +1,4 @@
+import re
 import time
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
@@ -11,6 +12,11 @@ from athena.ingestion.schemas import PaperRecord, arxiv_id
 
 ATOM = "{http://www.w3.org/2005/Atom}"
 ARXIV = "{http://arxiv.org/schemas/atom}"
+OPENSEARCH = "{http://a9.com/-/spec/opensearch/1.1/}"
+# Backoff of 3, 6, 12, and 24 seconds rides out brief upstream outages during bulk imports.
+ATTEMPTS = 5
+# arXiv registers each paper's DataCite DOI as 10.48550/arXiv.<identifier>.
+ARXIV_DOI = re.compile(r"(?:https?://(?:dx\.)?doi\.org/)?10\.48550/arxiv\.(.+)", re.IGNORECASE)
 
 
 class ProviderError(Exception):
@@ -35,17 +41,23 @@ class ScholarlyClient:
         self.sleep = sleep
 
     def get(self, url: str, **kwargs) -> httpx.Response:
-        for attempt in range(3):
+        for attempt in range(ATTEMPTS):
+            final = attempt == ATTEMPTS - 1
             try:
                 response = self.client.get(url, **kwargs)
-            except httpx.TransportError:
-                if attempt == 2:
-                    raise ProviderError("Upstream connection failed after 3 attempts") from None
+            except httpx.TransportError as error:
+                if final:
+                    raise ProviderError(
+                        f"Upstream connection failed after {ATTEMPTS} attempts "
+                        f"({type(error).__name__})"
+                    ) from None
                 self.sleep(3 * 2**attempt)
                 continue
             if response.status_code == 429 or response.status_code >= 500:
-                if attempt == 2:
-                    raise ProviderError(f"Upstream HTTP {response.status_code} after 3 attempts")
+                if final:
+                    raise ProviderError(
+                        f"Upstream HTTP {response.status_code} after {ATTEMPTS} attempts"
+                    )
                 delay = max(3, retry_delay(response.headers.get("retry-after"), attempt))
                 if delay > 60:
                     raise ProviderError(
@@ -62,9 +74,15 @@ class ScholarlyClient:
 
 
 def parse_arxiv(content: bytes) -> list[PaperRecord]:
+    return parse_arxiv_feed(content)[0]
+
+
+def parse_arxiv_feed(content: bytes) -> tuple[list[PaperRecord], int | None]:
+    """Return the page's records and the total result count the feed reports, if any."""
     root = ElementTree.fromstring(content)
     if root.tag != ATOM + "feed":
         raise ProviderError("Expected an arXiv Atom feed")
+    total = (root.findtext(OPENSEARCH + "totalResults") or "").strip()
     records = []
     for entry in root.findall(ATOM + "entry"):
 
@@ -93,7 +111,7 @@ def parse_arxiv(content: bytes) -> list[PaperRecord]:
                 payload=raw,
             )
         )
-    return records
+    return records, int(total) if total.isdigit() else None
 
 
 def parse_openalex(work: dict) -> PaperRecord:
@@ -115,6 +133,13 @@ def parse_openalex(work: dict) -> PaperRecord:
                 arxiv_ids.add(arxiv_id(url))
             except ValueError:
                 continue
+    # OpenAlex often lists an arXiv preprint only under its doi.org address.
+    datacite = ARXIV_DOI.fullmatch((work.get("doi") or "").strip())
+    if datacite:
+        try:
+            arxiv_ids.add(arxiv_id(datacite.group(1)))
+        except ValueError:
+            pass
     # Ambiguous links must not cause an automatic identity merge.
     arxiv = next(iter(arxiv_ids)) if len(arxiv_ids) == 1 else None
     return PaperRecord(
@@ -139,22 +164,33 @@ def parse_openalex(work: dict) -> PaperRecord:
 
 
 def fetch_arxiv(http: ScholarlyClient, query: str, limit: int) -> Iterator[PaperRecord]:
+    total = 0
     for start in range(0, limit, 100):
         if start:
             http.sleep(3)
-        response = http.get(
-            "https://export.arxiv.org/api/query",
-            params={
-                "search_query": query,
-                "start": start,
-                "max_results": min(100, limit - start),
-                "sortBy": "submittedDate",
-                "sortOrder": "descending",
-            },
-        )
-        records = parse_arxiv(response.content)
+        wanted = min(100, limit - start)
+        for attempt in range(3):
+            response = http.get(
+                "https://export.arxiv.org/api/query",
+                params={
+                    "search_query": query,
+                    "start": start,
+                    "max_results": wanted,
+                    "sortBy": "submittedDate",
+                    "sortOrder": "descending",
+                },
+            )
+            records, reported = parse_arxiv_feed(response.content)
+            total = max(total, reported or 0)
+            if len(records) >= min(wanted, total - start):
+                break
+            # arXiv intermittently serves a short page inside the result window it reports.
+            # Accepting it would silently truncate the import, so refetch instead.
+            if attempt == 2:
+                raise ProviderError("arXiv returned an incomplete page after 3 attempts")
+            http.sleep(3 * 2**attempt)
         yield from records
-        if len(records) < min(100, limit - start):
+        if len(records) < wanted:
             break
 
 

@@ -30,8 +30,9 @@ External APIs are never called by web requests. There is no implicit network act
    advisory lock for identity resolution. This deliberately favors correctness over parallel write
    throughput. No network request occurs while that lock is held.
 5. arXiv owns canonical title/abstract/date when present; OpenAlex supplies metadata for other papers.
-   Both source records remain available. DOI links can connect records, but probable preprint/version
-   matches are not guessed. A conflicting mapping requires operator review.
+   Both source records remain available. A shared DOI, or an OpenAlex work that links to exactly one
+   arXiv identifier, connects records; probable preprint/version matches are not guessed and titles
+   never merge papers. A conflicting mapping requires operator review.
 6. Do not infer publication review status from a metadata source or journal-reference string.
 7. Secrets live in environment variables. `.env` is ignored. Upstream exception strings and payloads
    are not logged; they may contain URLs or sensitive query parameters.

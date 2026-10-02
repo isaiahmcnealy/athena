@@ -34,6 +34,12 @@ TOPICS = (
     Topic(
         "Scientific computing", f"{AI} AND all:simulation", "machine learning scientific computing"
     ),
+    # Append new topics here; inserting earlier would renumber jobs for --start-at.
+    Topic(
+        "Oil and gas",
+        f'{AI} AND (all:petroleum OR all:"oil and gas" OR all:hydrocarbon OR all:drilling)',
+        "machine learning oil and gas",
+    ),
 )
 
 

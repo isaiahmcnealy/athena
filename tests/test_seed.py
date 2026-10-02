@@ -10,27 +10,27 @@ from athena.ingestion.seed import seed_plan
 
 def test_plan_balances_topics_and_sources_with_bounded_budget():
     plan = seed_plan()
-    assert len({job["topic"] for job in plan}) == 20
-    assert len(plan) == 40
-    assert sum(job["limit"] for job in plan) == 5000
+    assert len({job["topic"] for job in plan}) == 21
+    assert len(plan) == 42
+    assert sum(job["limit"] for job in plan) == 5250
     for source in ("arxiv", "openalex"):
         selected = seed_plan(250, source)
-        assert len(selected) == 20
+        assert len(selected) == 21
         assert {job["source"] for job in selected} == {source}
-        assert sum(job["limit"] for job in selected) == 5000
+        assert sum(job["limit"] for job in selected) == 5250
 
 
 def test_dry_run_never_connects_to_database_or_provider(monkeypatch, capsys):
     monkeypatch.setattr(cli, "get_settings", lambda: pytest.fail("Read settings during dry run"))
-    cli.main(["seed", "--dry-run", "--start-at", "39"])
+    cli.main(["seed", "--dry-run", "--start-at", "41"])
     output = json.loads(capsys.readouterr().out)
     assert output["requested_records"] == 250
-    assert [job["job"] for job in output["queries"]] == [39, 40]
+    assert [job["job"] for job in output["queries"]] == [41, 42]
 
 
 @pytest.mark.parametrize(
     "arguments",
-    [["--per-query", "0"], ["--per-query", "1001"], ["--start-at", "0"], ["--start-at", "41"]],
+    [["--per-query", "0"], ["--per-query", "1001"], ["--start-at", "0"], ["--start-at", "43"]],
 )
 def test_invalid_seed_bounds_are_rejected(arguments):
     with pytest.raises(SystemExit) as error:
@@ -49,7 +49,7 @@ def test_seed_reports_actual_insertions_and_spaces_queries(monkeypatch, capsys):
     importer = Mock(return_value=result)
     monkeypatch.setattr(cli, "import_query", importer)
     http = SimpleNamespace(sleep=Mock())
-    assert cli.run_seed(http, None, seed_plan(), 39) == 0
+    assert cli.run_seed(http, None, seed_plan(), 41) == 0
     assert importer.call_count == 2
     http.sleep.assert_called_once_with(3)
     summary = json.loads(capsys.readouterr().out.splitlines()[-1])
